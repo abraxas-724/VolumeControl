@@ -100,7 +100,10 @@ struct AudioProcessDetector {
         var bundleID: Unmanaged<CFString>?
         var bundleSize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
         let bundleStatus = AudioObjectGetPropertyData(objectID, &bundleAddress, 0, nil, &bundleSize, &bundleID)
-        let bundle = bundleStatus == noErr ? bundleID?.takeUnretainedValue() as String? : nil
+        guard bundleStatus == noErr else {
+            throw AudioServiceError.operationFailed(operation: "读取进程音频会话 Bundle ID", status: bundleStatus)
+        }
+        let bundle = bundleID?.takeUnretainedValue() as String?
         return AudioProcess(processID: processID, bundleID: bundle)
     }
 }
