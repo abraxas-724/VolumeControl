@@ -36,7 +36,11 @@ struct CoreAudioService: AudioService {
 
     func writeSystemVolume(_ value: Double) throws {
         var volume = Float(Self.clamped(value))
-        try writeFloat(&volume, address: deviceProperty(kAudioDevicePropertyVolumeScalar))
+        let device = try defaultOutputDevice()
+        let addresses = try volumePropertyAddresses(for: device)
+        for address in addresses {
+            try writeFloat(&volume, address: address, device: device)
+        }
     }
 
     func readMuted() throws -> Bool {
@@ -86,15 +90,37 @@ struct CoreAudioService: AudioService {
 
     private func deviceProperty(_ selector: AudioObjectPropertySelector) throws -> AudioObjectPropertyAddress {
         let device = try defaultOutputDevice()
-        var address = AudioObjectPropertyAddress(
-            mSelector: selector,
-            mScope: kAudioDevicePropertyScopeOutput,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        guard AudioObjectHasProperty(device, &address) else {
-            throw AudioServiceError.propertyUnavailable(String(selector))
+        let addresses = [kAudioObjectPropertyElementMain, 1, 2].map { element in
+            AudioObjectPropertyAddress(
+                mSelector: selector,
+                mScope: kAudioDevicePropertyScopeOutput,
+                mElement: element
+            )
         }
-        return address
+        for candidate in addresses {
+            var address = candidate
+            if AudioObjectHasProperty(device, &address) {
+                return candidate
+            }
+        }
+        throw AudioServiceError.propertyUnavailable(String(selector))
+    }
+
+    private func volumePropertyAddresses(for device: AudioDeviceID) throws -> [AudioObjectPropertyAddress] {
+        let addresses = [kAudioObjectPropertyElementMain, 1, 2].map { element in
+            AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyVolumeScalar,
+                mScope: kAudioDevicePropertyScopeOutput,
+                mElement: element
+            )
+        }.filter { candidate in
+            var address = candidate
+            return AudioObjectHasProperty(device, &address)
+        }
+        guard !addresses.isEmpty else {
+            throw AudioServiceError.propertyUnavailable(String(kAudioDevicePropertyVolumeScalar))
+        }
+        return addresses
     }
 
     private func readFloat(address: AudioObjectPropertyAddress) throws -> Float {
@@ -121,11 +147,15 @@ struct CoreAudioService: AudioService {
         return value
     }
 
-    private func writeFloat(_ value: inout Float, address: AudioObjectPropertyAddress) throws {
+    private func writeFloat(
+        _ value: inout Float,
+        address: AudioObjectPropertyAddress,
+        device: AudioDeviceID? = nil
+    ) throws {
         var address = address
-        let device = try defaultOutputDevice()
+        let targetDevice = try device ?? defaultOutputDevice()
         let size = UInt32(MemoryLayout<Float>.size)
-        let status = AudioObjectSetPropertyData(device, &address, 0, nil, size, &value)
+        let status = AudioObjectSetPropertyData(targetDevice, &address, 0, nil, size, &value)
         guard status == noErr else {
             throw AudioServiceError.operationFailed(operation: "写入音频属性", status: status)
         }

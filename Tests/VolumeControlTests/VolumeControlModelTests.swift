@@ -7,9 +7,10 @@ final class FakeAudioService: AudioService {
     var muted = false
     var deviceName = "测试输出"
     var shouldFail = false
+    var shouldFailVolume = false
 
     func readSystemVolume() throws -> Double {
-        if shouldFail { throw AudioServiceError.noDefaultOutputDevice }
+        if shouldFail || shouldFailVolume { throw AudioServiceError.propertyUnavailable("测试音量") }
         return volume
     }
 
@@ -19,7 +20,7 @@ final class FakeAudioService: AudioService {
     }
 
     func readMuted() throws -> Bool {
-        if shouldFail { throw AudioServiceError.noDefaultOutputDevice }
+        if shouldFail || shouldFailVolume { throw AudioServiceError.propertyUnavailable("测试静音") }
         return muted
     }
 
@@ -119,5 +120,17 @@ final class VolumeControlModelTests: XCTestCase {
         )
 
         XCTAssertEqual(model.statusMessage, "没有可用的输出设备")
+    }
+
+    func testDeviceNameRemainsVisibleWhenVolumePropertyIsUnavailable() {
+        let audio = FakeAudioService()
+        audio.shouldFailVolume = true
+        let model = VolumeControlModel(
+            audio: audio,
+            applicationProvider: FakeApplicationProvider(values: [])
+        )
+
+        XCTAssertEqual(model.outputDeviceName, "测试输出")
+        XCTAssertEqual(model.statusMessage, "音频属性不可用：测试音量")
     }
 }
