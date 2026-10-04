@@ -23,6 +23,7 @@ struct VolumeControlApp: App {
 struct VolumePanel: View {
     @ObservedObject var model: VolumeControlModel
     @AppStorage("showPercentage") private var showPercentage = true
+    @State private var showInstallSheet = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -42,6 +43,11 @@ struct VolumePanel: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWorkspace.didTerminateApplicationNotification)) { _ in
             model.refresh()
+        }
+        .sheet(isPresented: $showInstallSheet) {
+            if let manager = model.virtualDeviceManager {
+                BlackHoleInstallView(installGuide: manager.getInstallationGuide())
+            }
         }
     }
 
@@ -106,6 +112,25 @@ struct VolumePanel: View {
                 Text("应用音量")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
+                if model.blackHoleAvailable {
+                    if model.isV2Enabled {
+                        Text("✅ v2.0 已启用")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    } else {
+                        Button("启用 v2.0") {
+                            model.enableV2()
+                        }
+                        .font(.caption)
+                        .buttonStyle(.bordered)
+                    }
+                } else {
+                    Button("安装 BlackHole") {
+                        showInstallSheet = true
+                    }
+                    .font(.caption)
+                    .buttonStyle(.bordered)
+                }
                 Text("\(model.apps.count)")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
@@ -166,11 +191,21 @@ private struct AppVolumeRow: View {
             }
             Spacer(minLength: 4)
             if app.capability.isSupported {
+                Button {
+                    model.toggleAppMute(id: app.id)
+                } label: {
+                    Image(systemName: "speaker.slash")
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("静音")
+                .help("静音此应用")
+                
                 Slider(value: Binding(
                     get: { app.volume },
                     set: { model.setAppVolume(id: app.id, volume: $0) }
                 ), in: 0...1)
-                .frame(width: 100)
+                .frame(width: 80)
                 Text("\(Int(app.volume * 100))")
                     .font(.caption.monospacedDigit())
                     .frame(width: 28, alignment: .trailing)
