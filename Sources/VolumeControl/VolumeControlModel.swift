@@ -65,12 +65,18 @@ final class VolumeControlModel: ObservableObject {
     }
 
     func refresh() {
-        refreshSystemAudio()
+        let audioError = refreshSystemAudio()
         let discovered = applicationProvider.applications(excluding: Bundle.main.bundleIdentifier)
         apps = discovered.map { application in
-            let capability: AppAudioCapability = application.hasAudioSession
-                ? .unsupported("系统接口不支持应用增益")
-                : .noAudioSession
+            let capability: AppAudioCapability
+            switch application.audioSessionStatus {
+            case .detected:
+                capability = .unsupported("系统接口不支持应用增益")
+            case .notDetected:
+                capability = .noAudioSession
+            case .unavailable(let reason):
+                capability = .unsupported("无法检测音频会话：\(reason)")
+            }
             return AppVolume(
                 id: "\(application.bundleID):\(application.processID)",
                 name: application.name,
@@ -79,9 +85,11 @@ final class VolumeControlModel: ObservableObject {
                 capability: capability
             )
         }
-        if apps.isEmpty {
+        if let audioError {
+            statusMessage = audioError
+        } else if apps.isEmpty {
             statusMessage = "打开应用后点击刷新"
-        } else if statusMessage == "正在探测音频状态" {
+        } else {
             statusMessage = "已发现 \(apps.count) 个运行中的应用"
         }
     }
@@ -118,14 +126,15 @@ final class VolumeControlModel: ObservableObject {
         apps[index].volume = Self.clamped(volume)
     }
 
-    private func refreshSystemAudio() {
+    private func refreshSystemAudio() -> String? {
         do {
             systemVolume = Self.clamped(try audio.readSystemVolume())
             isMuted = try audio.readMuted()
             outputDeviceName = try audio.outputDeviceName()
+            return nil
         } catch {
             outputDeviceName = "输出设备不可用"
-            statusMessage = error.localizedDescription
+            return error.localizedDescription
         }
     }
 

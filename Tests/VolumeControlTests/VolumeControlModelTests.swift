@@ -44,6 +44,13 @@ struct FakeApplicationProvider: ApplicationProvider {
 
 @MainActor
 final class VolumeControlModelTests: XCTestCase {
+    func testLoginItemRegistrationStates() {
+        XCTAssertTrue(LoginItemStatus.enabled.isRegistered)
+        XCTAssertTrue(LoginItemStatus.requiresApproval.isRegistered)
+        XCTAssertFalse(LoginItemStatus.disabled.isRegistered)
+        XCTAssertFalse(LoginItemStatus.unavailable.isRegistered)
+    }
+
     func testCapabilityLabels() {
         XCTAssertEqual(AppAudioCapability.supported.label, "可调节")
         XCTAssertEqual(AppAudioCapability.noAudioSession.label, "未检测到音频输出")
@@ -75,7 +82,7 @@ final class VolumeControlModelTests: XCTestCase {
             name: "Player",
             icon: NSImage(size: NSSize(width: 16, height: 16)),
             processID: 101,
-            hasAudioSession: true
+            audioSessionStatus: .detected
         )
         let model = VolumeControlModel(
             audio: FakeAudioService(),
@@ -85,5 +92,32 @@ final class VolumeControlModelTests: XCTestCase {
         XCTAssertEqual(model.apps.count, 1)
         XCTAssertEqual(model.apps[0].capability, .unsupported("系统接口不支持应用增益"))
         XCTAssertFalse(model.apps[0].capability.isSupported)
+    }
+
+    func testAudioSessionDetectionFailureIsNotReportedAsNoSession() {
+        let application = DiscoveredApplication(
+            bundleID: "com.example.player",
+            name: "Player",
+            icon: NSImage(size: NSSize(width: 16, height: 16)),
+            processID: 101,
+            audioSessionStatus: .unavailable("Core Audio 查询失败")
+        )
+        let model = VolumeControlModel(
+            audio: FakeAudioService(),
+            applicationProvider: FakeApplicationProvider(values: [application])
+        )
+
+        XCTAssertEqual(model.apps[0].capability, .unsupported("无法检测音频会话：Core Audio 查询失败"))
+    }
+
+    func testAudioFailureRemainsVisibleWhenApplicationListIsEmpty() {
+        let audio = FakeAudioService()
+        audio.shouldFail = true
+        let model = VolumeControlModel(
+            audio: audio,
+            applicationProvider: FakeApplicationProvider(values: [])
+        )
+
+        XCTAssertEqual(model.statusMessage, "没有可用的输出设备")
     }
 }
