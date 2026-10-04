@@ -1,6 +1,5 @@
 import AppKit
 import Foundation
-import AVFoundation
 
 enum AppAudioCapability: Equatable {
     case supported
@@ -48,53 +47,52 @@ final class VolumeControlModel: ObservableObject {
     @Published private(set) var statusMessage = "正在探测音频状态"
     @Published private(set) var isV2Enabled = false
     @Published private(set) var blackHoleAvailable = false
+    @Published private(set) var isEnablingRouting = false
 
     private let audio: any AudioService
     private let applicationProvider: any ApplicationProvider
     private var deviceMonitor: AudioDeviceMonitor?
     
-    // v2.0 components
-    var virtualDeviceManager: VirtualDeviceManager?
-    private var audioRouter: AudioDeviceRouter?
-    private var audioMixer: AudioStreamMixer?
-    private var volumeController: PerAppVolumeController?
-    private var volumeStorage: VolumeConfigStorage?
+    private var audioRouter: any AudioRouting
+    private let inputPermission: any AudioInputPermissionProviding
+    private var enableRequestID = 0
+    private var routingError: String?
+    private var terminationObserver: NSObjectProtocol?
+    let blackHoleInstallGuide = VirtualDeviceManager().getInstallationGuide()
 
     init(
         audio: any AudioService = CoreAudioService(),
-        applicationProvider: any ApplicationProvider = WorkspaceApplicationProvider()
+        applicationProvider: any ApplicationProvider = WorkspaceApplicationProvider(),
+        audioRouter: (any AudioRouting)? = nil,
+        monitorDevices: Bool = true,
+        inputPermission: any AudioInputPermissionProviding = AudioInputPermission()
     ) {
         self.audio = audio
         self.applicationProvider = applicationProvider
+        self.audioRouter = audioRouter ?? AudioDeviceRouter()
+        self.inputPermission = inputPermission
         systemVolume = 0
-        deviceMonitor = nil
-        deviceMonitor = AudioDeviceMonitor { [weak self] in
-            self?.refresh()
+        if monitorDevices {
+            deviceMonitor = AudioDeviceMonitor { [weak self] in self?.refresh() }
+            terminationObserver = NotificationCenter.default.addObserver(
+                forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.disableV2() }
+            }
         }
-        
-        // Initialize v2.0 components
-        initializeV2Components()
-        
+        self.audioRouter.onFailure = { [weak self] error in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.isV2Enabled = false
+                self.routingError = error.localizedDescription
+                self.refresh()
+            }
+        }
         refresh()
     }
-    
-    private func initializeV2Components() {
-        virtualDeviceManager = VirtualDeviceManager()
-        blackHoleAvailable = virtualDeviceManager?.detectBlackHole() ?? false
-        
-        if blackHoleAvailable {
-            audioRouter = AudioDeviceRouter()
-            audioMixer = AudioStreamMixer()
-            volumeStorage = VolumeConfigStorage()
-            
-            if let mixer = audioMixer, let storage = volumeStorage {
-                volumeController = PerAppVolumeController(mixer: mixer, storage: storage)
-            }
-            
-            statusMessage = "✅ v2.0 应用级音量控制已就绪"
-        } else {
-            statusMessage = "⚠️ 需要安装 BlackHole 以启用应用级音量控制"
-        }
+
+    deinit {
+        if let terminationObserver { NotificationCenter.default.removeObserver(terminationObserver) }
     }
 
     func refresh() {
@@ -103,55 +101,39 @@ final class VolumeControlModel: ObservableObject {
         apps = discovered.map { application in
             let capability: AppAudioCapability
             
-            // v2.0: Check if we can control this app
-            if isV2Enabled && blackHoleAvailable {
-                switch application.audioSessionStatus {
-                case .detected:
-                    capability = .supported
-                case .notDetected:
-                    capability = .noAudioSession
-                case .unavailable(let reason):
-                    capability = .unsupported("无法检测音频会话：\(reason)")
-                }
-            } else {
-                // v1.0: Can't control apps without v2.0
-                switch application.audioSessionStatus {
-                case .detected:
-                    capability = .unsupported("需要启用 v2.0 功能")
-                case .notDetected:
-                    capability = .noAudioSession
-                case .unavailable(let reason):
-                    capability = .unsupported("无法检测音频会话：\(reason)")
-                }
+            // BlackHole 提供混合流，发现进程会话不能证明存在独立增益通道。
+            switch application.audioSessionStatus {
+            case .detected:
+                capability = .unsupported("系统接口不支持应用增益")
+            case .notDetected:
+                capability = .noAudioSession
+            case .unavailable(let reason):
+                capability = .unsupported("无法检测音频会话：\(reason)")
             }
-            
-            // Restore saved volume for this app
-            let savedVolume: Double
-            if let controller = volumeController {
-                savedVolume = Double(controller.getVolume(forApp: application.bundleID))
-            } else {
-                savedVolume = 1.0
-            }
-            
+
             return AppVolume(
                 id: "\(application.bundleID):\(application.processID)",
                 name: application.name,
                 icon: application.icon,
-                volume: savedVolume,
+                volume: 1.0,
                 capability: capability
             )
         }
-        if let audioError {
+        do { blackHoleAvailable = try audioRouter.isBlackHoleAvailable() }
+        catch {
+            blackHoleAvailable = false
+            routingError = error.localizedDescription
+        }
+        if let routingError {
+            statusMessage = routingError
+        } else if isV2Enabled {
+            statusMessage = "音频路由验证运行中；尚不支持应用独立音量"
+        } else if let audioError {
             statusMessage = audioError
         } else if apps.isEmpty {
             statusMessage = "打开应用后点击刷新"
         } else {
-            let supportedCount = apps.filter { $0.capability.isSupported }.count
-            if isV2Enabled && supportedCount > 0 {
-                statusMessage = "已发现 \(apps.count) 个应用，其中 \(supportedCount) 个可控制音量"
-            } else {
-                statusMessage = "已发现 \(apps.count) 个运行中的应用"
-            }
+            statusMessage = "已发现 \(apps.count) 个运行中的应用"
         }
     }
 
@@ -183,73 +165,47 @@ final class VolumeControlModel: ObservableObject {
     }
 
     func setAppVolume(id: String, volume: Double) {
-        guard let index = apps.firstIndex(where: { $0.id == id }), apps[index].capability.isSupported else { return }
-        let clampedVolume = Self.clamped(volume)
-        apps[index].volume = clampedVolume
-        
-        // v2.0: Apply volume to mixer
-        if isV2Enabled, let controller = volumeController {
-            let parts = id.split(separator: ":")
-            if parts.count == 2,
-               let bundleID = parts.first.map(String.init),
-               let pidString = parts.last.map(String.init),
-               let pid = pid_t(pidString) {
-                controller.setVolume(Float(clampedVolume), forApp: bundleID, pid: pid)
-                statusMessage = "\(apps[index].name) 音量: \(Int(clampedVolume * 100))%"
-            }
-        }
+        guard let app = apps.first(where: { $0.id == id }) else { return }
+        statusMessage = app.capability.label
     }
-    
+
     func toggleAppMute(id: String) {
-        guard let index = apps.firstIndex(where: { $0.id == id }), apps[index].capability.isSupported else { return }
-        
-        if isV2Enabled, let controller = volumeController {
-            let parts = id.split(separator: ":")
-            if parts.count == 2,
-               let bundleID = parts.first.map(String.init),
-               let pidString = parts.last.map(String.init),
-               let pid = pid_t(pidString) {
-                let isMuted = controller.isMuted(forApp: bundleID)
-                if isMuted {
-                    controller.unmuteApp(bundleID, pid: pid)
-                    statusMessage = "\(apps[index].name) 已取消静音"
-                } else {
-                    controller.muteApp(bundleID, pid: pid)
-                    statusMessage = "\(apps[index].name) 已静音"
-                }
-            }
-        }
+        guard let app = apps.first(where: { $0.id == id }) else { return }
+        statusMessage = app.capability.label
     }
-    
-    func enableV2() {
-        guard blackHoleAvailable else {
-            statusMessage = "⚠️ 需要先安装 BlackHole"
-            return
-        }
-        
+
+    func enableV2() async {
+        guard !isEnablingRouting, !isV2Enabled else { return }
+        isEnablingRouting = true
+        enableRequestID += 1
+        let request = enableRequestID
+        defer { isEnablingRouting = false }
         do {
-            if let router = audioRouter {
-                try router.startRouting()
-                isV2Enabled = true
-                statusMessage = "✅ v2.0 应用级音量控制已启用"
-                refresh()
-            }
+            guard try audioRouter.isBlackHoleAvailable() else { throw AudioRoutingError.blackHoleNotFound }
+            let allowed = try await inputPermission.requestAccess()
+            guard !Task.isCancelled, request == enableRequestID else { return }
+            guard allowed else { throw AudioRoutingError.engineFailed("请在系统设置 → 隐私与安全性 → 麦克风中允许音频输入") }
+            try audioRouter.startRouting()
+            isV2Enabled = audioRouter.isRouting
+            routingError = nil
         } catch {
-            statusMessage = "❌ 启用失败: \(error.localizedDescription)"
+            guard !Task.isCancelled, request == enableRequestID else { return }
+            isV2Enabled = false
+            routingError = "启用路由失败：\(error.localizedDescription)"
         }
-    }
-    
-    func disableV2() {
-        audioRouter?.stopRouting()
-        isV2Enabled = false
-        statusMessage = "v2.0 功能已禁用"
         refresh()
     }
-    
-    func installBlackHole() {
-        if let manager = virtualDeviceManager {
-            statusMessage = manager.getInstallationGuide()
+
+    func disableV2() {
+        enableRequestID += 1
+        do {
+            try audioRouter.stopRouting()
+            routingError = nil
+        } catch {
+            routingError = "停止路由失败：\(error.localizedDescription)"
         }
+        isV2Enabled = false
+        refresh()
     }
 
     private func refreshSystemAudio() -> String? {
@@ -270,6 +226,6 @@ final class VolumeControlModel: ObservableObject {
     }
 
     private static func clamped(_ value: Double) -> Double {
-        min(max(value, 0), 1)
+        value.isFinite ? min(max(value, 0), 1) : 0
     }
 }

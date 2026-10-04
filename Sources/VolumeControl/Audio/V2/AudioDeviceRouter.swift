@@ -1,139 +1,112 @@
-import Foundation
 import CoreAudio
-import AVFoundation
+import Foundation
+import OSLog
 
-/// 音频设备路由管理器 - 管理音频流路由
-/// Week 2 Day 3-4 交付物
-class AudioDeviceRouter {
-    
-    // MARK: - Properties
-    
-    private let virtualDeviceManager = VirtualDeviceManager()
-    private var audioEngine: AVAudioEngine?
-    private var isRouting = false
-    
-    // MARK: - Initialization
-    
-    init() {
-        setupAudioEngine()
+/// 调用与故障通知均在主线程执行，音频回调必须先调度到主线程。
+protocol AudioRouting {
+    var isRouting: Bool { get }
+    var onFailure: ((Error) -> Void)? { get set }
+    func isBlackHoleAvailable() throws -> Bool
+    func startRouting() throws
+    func stopRouting() throws
+}
+
+protocol AudioRoutingDevices {
+    func blackHoleDevice() throws -> AudioDeviceID?
+    func defaultOutputDevice() throws -> AudioDeviceID
+    func validatePhysicalOutput(_ device: AudioDeviceID) throws
+    func setDefaultOutputDevice(_ device: AudioDeviceID) throws
+}
+
+protocol AudioRoutingEngine {
+    func start(input: AudioDeviceID, output: AudioDeviceID, onFailure: @escaping (Error) -> Void) throws
+    func stop()
+}
+
+enum AudioRoutingError: LocalizedError {
+    case blackHoleNotFound
+    case physicalOutputRequired
+    case invalidFormat(String)
+    case operationFailed(String, OSStatus)
+    case engineFailed(String)
+    case rollbackFailed(primary: String, recovery: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .blackHoleNotFound: return "未找到可用的 BlackHole 输入设备"
+        case .physicalOutputRequired: return "请先选择真实输出设备，再启动音频路由验证"
+        case .invalidFormat(let reason): return "音频格式不可用：\(reason)"
+        case .operationFailed(let operation, let status): return "\(operation)失败（OSStatus \(status)）"
+        case .engineFailed(let reason): return "音频转发失败：\(reason)"
+        case .rollbackFailed(let primary, let recovery): return "\(primary)；恢复输出设备失败：\(recovery)"
+        }
     }
-    
+}
+
+/// 生命周期由主线程串行调用；先建立转发通道，再切换系统输出，避免启动失败导致静音。
+final class AudioDeviceRouter: AudioRouting {
+    private let devices: any AudioRoutingDevices
+    private let engine: any AudioRoutingEngine
+    private var route: (input: AudioDeviceID, output: AudioDeviceID)?
+    private var generation = 0
+    private(set) var isRouting = false
+    var onFailure: ((Error) -> Void)?
+
+    init(
+        devices: any AudioRoutingDevices = CoreAudioRoutingDevices(),
+        engine: any AudioRoutingEngine = AVAudioRoutingEngine()
+    ) {
+        self.devices = devices
+        self.engine = engine
+    }
+
     deinit {
-        stopRouting()
+        do { try stopRouting() }
+        catch { Logger(subsystem: "com.volumecontrol.app", category: "routing").error("\(error.localizedDescription, privacy: .public)") }
     }
-    
-    // MARK: - Audio Engine Setup
-    
-    private func setupAudioEngine() {
-        audioEngine = AVAudioEngine()
-        print("✅ Audio engine created for routing")
+
+    func isBlackHoleAvailable() throws -> Bool {
+        try devices.blackHoleDevice() != nil
     }
-    
-    // MARK: - Routing Control
-    
-    /// 开始音频路由
-    /// BlackHole (虚拟设备) → 音频处理 → 真实硬件
+
     func startRouting() throws {
-        guard !isRouting else {
-            print("⚠️  Routing already active")
-            return
-        }
-        
-        // 1. 检测 BlackHole
-        guard virtualDeviceManager.detectBlackHole() else {
-            throw RoutingError.blackHoleNotFound
-        }
-        
-        // 2. 获取 BlackHole 设备 ID
-        guard let blackHoleID = virtualDeviceManager.getBlackHoleDeviceID() else {
-            throw RoutingError.blackHoleNotFound
-        }
-        
-        // 3. 切换系统输出到 BlackHole
-        guard virtualDeviceManager.switchToBlackHole() else {
-            throw RoutingError.switchFailed
-        }
-        
-        // 4. 启动音频引擎（从 BlackHole 读取）
-        try audioEngine?.start()
-        
-        isRouting = true
-        print("✅ Audio routing started: System → BlackHole → Processing → Output")
-    }
-    
-    /// 停止音频路由
-    func stopRouting() {
-        guard isRouting else { return }
-        
-        // 1. 停止音频引擎
-        audioEngine?.stop()
-        
-        // 2. 恢复原始输出设备
-        _ = virtualDeviceManager.restoreOriginalDevice()
-        
-        isRouting = false
-        print("🛑 Audio routing stopped")
-    }
-    
-    /// 安装音频处理回调
-    func installProcessingTap(callback: @escaping (AVAudioPCMBuffer, AVAudioTime) -> Void) {
-        guard let engine = audioEngine else { return }
-        
-        let inputNode = engine.inputNode
-        let format = inputNode.outputFormat(forBus: 0)
-        
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, time in
-            callback(buffer, time)
-        }
-        
-        print("🎤 Processing tap installed")
-    }
-    
-    /// 移除音频处理回调
-    func removeProcessingTap() {
-        audioEngine?.inputNode.removeTap(onBus: 0)
-        print("🔇 Processing tap removed")
-    }
-    
-    // MARK: - Device Management
-    
-    /// 检查 BlackHole 是否可用
-    func isBlackHoleAvailable() -> Bool {
-        return virtualDeviceManager.detectBlackHole()
-    }
-    
-    /// 获取 BlackHole 安装指南
-    func getBlackHoleInstallGuide() -> String {
-        return virtualDeviceManager.getInstallationGuide()
-    }
-    
-    // MARK: - Status
-    
-    func printStatus() {
-        print("\n=== Audio Device Router ===")
-        print("Routing active: \(isRouting)")
-        print("BlackHole available: \(isBlackHoleAvailable())")
-        print("Audio engine running: \(audioEngine?.isRunning ?? false)")
-        virtualDeviceManager.printStatus()
-        print("===========================\n")
-    }
-    
-    // MARK: - Error Types
-    
-    enum RoutingError: LocalizedError {
-        case blackHoleNotFound
-        case switchFailed
-        case engineStartFailed
-        
-        var errorDescription: String? {
-            switch self {
-            case .blackHoleNotFound:
-                return "BlackHole 虚拟音频设备未安装"
-            case .switchFailed:
-                return "无法切换到 BlackHole 设备"
-            case .engineStartFailed:
-                return "音频引擎启动失败"
+        guard !isRouting else { return }
+        // 未完成的恢复必须先重试，不能把 BlackHole 保存成原始设备。
+        if route != nil { try stopRouting() }
+        guard let input = try devices.blackHoleDevice() else { throw AudioRoutingError.blackHoleNotFound }
+        let output = try devices.defaultOutputDevice()
+        guard input != output else { throw AudioRoutingError.physicalOutputRequired }
+        try devices.validatePhysicalOutput(output)
+        generation += 1
+        let session = generation
+        do {
+            try engine.start(input: input, output: output) { [weak self] error in
+                guard let self, self.generation == session, self.isRouting else { return }
+                var reportedError = error
+                do { try self.stopRouting() }
+                catch { reportedError = AudioRoutingError.rollbackFailed(primary: reportedError.localizedDescription, recovery: error.localizedDescription) }
+                self.onFailure?(reportedError)
             }
+            route = (input, output)
+            try devices.setDefaultOutputDevice(input)
+            isRouting = true
+        } catch {
+            let primary = error
+            do { try stopRouting() }
+            catch { throw AudioRoutingError.rollbackFailed(primary: primary.localizedDescription, recovery: error.localizedDescription) }
+            throw primary
         }
+    }
+
+    func stopRouting() throws {
+        generation += 1
+        isRouting = false
+        defer { engine.stop() }
+        guard let route else { return }
+        // 用户主动选择了其他输出时保留该选择。
+        if try devices.defaultOutputDevice() == route.input {
+            try devices.setDefaultOutputDevice(route.output)
+        }
+        self.route = nil
     }
 }

@@ -4,11 +4,18 @@ import XCTest
 /// Core Audio PoC 测试
 /// Week 1 Day 5-7 交付物
 final class CoreAudioPOCTests: XCTestCase {
+    override func setUpWithError() throws {
+        guard ProcessInfo.processInfo.environment["VOLUMECONTROL_HARDWARE_TESTS"] == "1" else {
+            throw XCTSkip("真机音频测试须显式设置 VOLUMECONTROL_HARDWARE_TESTS=1")
+        }
+    }
+
     
     var sut: CoreAudioPOC!
     
     override func setUp() {
         super.setUp()
+        guard ProcessInfo.processInfo.environment["VOLUMECONTROL_HARDWARE_TESTS"] == "1" else { return }
         sut = CoreAudioPOC()
     }
     

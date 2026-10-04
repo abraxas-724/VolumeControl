@@ -4,11 +4,18 @@ import XCTest
 /// 进程音频标识测试
 /// Week 1 交付物
 final class ProcessAudioIdentifierTests: XCTestCase {
+    override func setUpWithError() throws {
+        guard ProcessInfo.processInfo.environment["VOLUMECONTROL_HARDWARE_TESTS"] == "1" else {
+            throw XCTSkip("真机音频测试须显式设置 VOLUMECONTROL_HARDWARE_TESTS=1")
+        }
+    }
+
     
     var sut: ProcessAudioIdentifier!
     
     override func setUp() {
         super.setUp()
+        guard ProcessInfo.processInfo.environment["VOLUMECONTROL_HARDWARE_TESTS"] == "1" else { return }
         sut = ProcessAudioIdentifier()
     }
     

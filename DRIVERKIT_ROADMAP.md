@@ -1,5 +1,8 @@
 # VolumeControl DriverKit 开发路线图
 
+> 2026-10-04 核验说明：本文保留早期研究与伪代码，不代表已创建可编译的 DriverKit 项目。AudioDriverKit 虚拟设备路径、客户端/PID 接口与签名权限尚未验证。下一阶段先评估 Process Tap / Audio Server Plug-in，详见 [当前验证记录](docs/AUDIO_ROUTING_VALIDATION.md#下一阶段技术门槛)。
+
+
 ## 项目目标
 
 实现真正的应用级音量控制，通过自定义音频驱动追踪每个应用的音频流。

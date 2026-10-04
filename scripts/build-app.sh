@@ -31,6 +31,8 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>音频路由验证需要读取 BlackHole 虚拟音频输入并转发到您选择的输出设备。</string>
     <key>LSUIElement</key>
     <true/>
 </dict>

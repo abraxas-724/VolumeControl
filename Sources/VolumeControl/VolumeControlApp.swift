@@ -24,6 +24,7 @@ struct VolumePanel: View {
     @ObservedObject var model: VolumeControlModel
     @AppStorage("showPercentage") private var showPercentage = true
     @State private var showInstallSheet = false
+    @State private var routingTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -44,10 +45,9 @@ struct VolumePanel: View {
         .onReceive(NotificationCenter.default.publisher(for: NSWorkspace.didTerminateApplicationNotification)) { _ in
             model.refresh()
         }
+        .onDisappear { routingTask?.cancel() }
         .sheet(isPresented: $showInstallSheet) {
-            if let manager = model.virtualDeviceManager {
-                BlackHoleInstallView(installGuide: manager.getInstallationGuide())
-            }
+            BlackHoleInstallView(installGuide: model.blackHoleInstallGuide)
         }
     }
 
@@ -113,13 +113,19 @@ struct VolumePanel: View {
                     .font(.subheadline.weight(.semibold))
                 Spacer()
                 if model.blackHoleAvailable {
-                    if model.isV2Enabled {
-                        Text("✅ v2.0 已启用")
+                    if model.isEnablingRouting {
+                        Button("取消启动") {
+                            routingTask?.cancel()
+                            model.disableV2()
+                        }
+                        .font(.caption)
+                    } else if model.isV2Enabled {
+                        Button("停止路由验证") { model.disableV2() }
                             .font(.caption)
-                            .foregroundStyle(.green)
+                            .buttonStyle(.bordered)
                     } else {
-                        Button("启用 v2.0") {
-                            model.enableV2()
+                        Button("验证音频路由") {
+                            routingTask = Task { await model.enableV2() }
                         }
                         .font(.caption)
                         .buttonStyle(.bordered)
@@ -135,6 +141,10 @@ struct VolumePanel: View {
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
+
+            Text("应用独立音量尚未实现。BlackHole 仅用于混合音频路由验证。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
 
             if model.apps.isEmpty {
                 ContentUnavailableView("暂无运行中的应用", systemImage: "app.dashed", description: Text("打开应用后点击刷新"))

@@ -1,5 +1,8 @@
 # P3 应用级音量控制技术方案研究
 
+> 2026-10-04：本文为早期研究/规划，不能把 BlackHole 混合流按 PID 分离视为可行或已完成，也不能据缺少直接增益属性排除 Process Tap 路径。当前执行状态以 [TASK_PLAN.md](TASK_PLAN.md) 和 [验证记录](docs/AUDIO_ROUTING_VALIDATION.md) 为准。
+
+
 ## 问题定义
 
 macOS 公开 Core Audio API 可以：

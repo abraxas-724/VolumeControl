@@ -1,12 +1,21 @@
 # VolumeControl v2.0 应用级音量控制 - 任务计划书
 
 **项目目标**: 实现真正的应用级音量控制，能够独立控制每个应用的音量  
-**技术方案**: DriverKit 音频驱动 + 用户空间音频处理  
+**技术方案**: 第一阶段 BlackHole 回路验证；第二阶段进程音频隔离路径待 PoC 确认
 **开发策略**: 方案 C - 两阶段推进（先修复音频回路验证，再开发 DriverKit）  
 **预计时间**: 3-4 个月  
 **创建日期**: 2026-01-XX
 
 ---
+
+## 当前执行状态（2026-10-04）
+
+本文件早期的 DriverKit 示例与性能勾选是规划假设，不代表实测完成。以本节和 [本阶段验证记录](docs/AUDIO_ROUTING_VALIDATION.md) 为当前依据。
+
+- 第一阶段 Task 1.1/1.2：输入/输出设备绑定、PCM 转发和格式转换已实现；启动/停止/失败回滚已通过模拟测试。
+- Task 1.3：听音、端到端延迟、CPU/内存、长时间运行和真机设备切换尚未验收，第一阶段未整体完成。
+- 应用级增益：尚未实现。BlackHole 混合流和进程会话发现不构成独立控制能力，UI 不再误报可调节。
+- 下一步：完成第一阶段真机矩阵；第二阶段先核验 Core Audio Process Tap 与 Audio Server Plug-in 的隔离路径，再决定是否需要驱动。旧 DriverKit 的客户端/进程接口和免费账号假设需重新验证。
 
 ## 📋 执行摘要
 
@@ -18,8 +27,8 @@
 - ⚠️ v2.0 代码存在音频路由回路问题（音频卡在 BlackHole）
 
 ### 核心挑战
-**技术真相**: 在 macOS 用户空间无法实现真正的应用级音量控制
-- macOS 不提供进程级音频流 API
+**待核验的早期假设**: 原文把所有用户空间路径排除，结论过于绝对。Core Audio 已提供 Process Tap API，应先验证其捕获、静音和重放闭环。
+- 当前项目的进程枚举尚未接入进程音频捕获
 - AVAudioEngine 无法区分音频来源
 - BlackHole 接收到的是混合后的音频流
 
@@ -33,7 +42,7 @@
 - ✅ macOS 27.0.1
 - ✅ Xcode 27.0
 - ✅ Swift 5.9+
-- ⚠️ Apple Developer Account (需要，免费账号即可本地开发)
+- ⚠️ Apple Developer Account / 签名权限 / provisioning profile（待核验）
 
 ---
 
@@ -159,9 +168,9 @@ class AudioForwarder {
 ### 第一阶段交付物
 
 - [x] 修复后的 AudioDeviceRouter.swift
-- [x] 测试报告（性能数据）
-- [x] 技术验证文档
-- [x] Git commit: `fix(v2): implement complete audio routing loop`
+- [ ] 真机测试报告（性能数据）
+- [x] 技术验证文档（模拟结果和待验收矩阵）
+- [ ] 第一阶段验收完成后的里程碑 tag（本次仅提交路由修复代码）
 
 ### 第一阶段成功标准
 
@@ -198,7 +207,7 @@ class AudioForwarder {
 #### Task 2.1.1: DriverKit 环境准备（Day 1）
 
 **检查清单**:
-- [ ] Apple Developer Account（免费账号即可）
+- [ ] Apple Developer Account（DriverKit 所需权限和 profile 待核验）
 - [ ] Xcode 27.0 已安装 ✅
 - [ ] macOS 27.0.1 ✅
 - [ ] 理解 DriverKit 权限模型
@@ -1092,7 +1101,7 @@ struct AppVolumeControlView: View {
 **系统要求**:
 - macOS 27.0.1+ ✅
 - Xcode 27.0+ ✅
-- Apple Developer Account（免费账号即可）
+- Apple Developer Account（DriverKit 所需权限和 profile 待核验）
 
 **必需工具**:
 - Xcode Command Line Tools
@@ -1129,31 +1138,20 @@ struct AppVolumeControlView: View {
 
 ## 🎯 下一步行动
 
-### 立即开始（今天）
+### 当前待办
 
-**Task 1: 修复音频路由回路**
-- 预计时间: 1-2 小时
-- 文件: `AudioDeviceRouter.swift`
-- 目标: 音频可以听到
+**Task 1.3：第一阶段真机验收**
+- 使用打包应用验证 BlackHole → 真实设备可听音频。
+- 测量端到端延迟、CPU 和内存，执行设备断开与重复启停矩阵。
+- 保存结果后才标记第一阶段完成并创建里程碑 tag。
 
-**完成后**:
-- 测试验证
-- Git 提交
-- 更新任务计划
+### 后续技术准备
 
-### 准备工作（本周）
+- 核验 Core Audio Process Tap 按进程捕获、静音与重放能力及权限。
+- 如果需要虚拟设备，再验证 Audio Server Plug-in 客户端隔离路径。
+- DriverKit 环境和项目创建任务须以 API 与签名条件验证结果为前提；不将旧伪代码当成可用接口。
 
-**Task 2: DriverKit 环境准备**
-- 确认 Apple Developer Account
-- 学习 DriverKit 基础
-- 阅读 BackgroundMusic 源码
-
-### 下周开始
-
-**Task 3: 创建 DriverKit 项目**
-- 在 Xcode 中创建扩展
-- 实现最简单的虚拟设备
-- 验证 PoC
+代码验证和回滚操作详见 [本阶段验证记录](docs/AUDIO_ROUTING_VALIDATION.md)。
 
 ---
 
@@ -1162,12 +1160,13 @@ struct AppVolumeControlView: View {
 | 日期 | 版本 | 更新内容 | 作者 |
 |------|------|---------|------|
 | 2026-01-XX | 1.0 | 初始版本，完整计划 | System |
+| 2026-10-04 | 1.1 | 实现 BlackHole 转发与失败恢复；纠正能力误报；真机验收仍待执行 | Codex |
 
 ---
 
-**项目状态**: 🟡 计划中  
-**当前阶段**: 准备启动  
-**预计完成**: 2026-04-XX  
+**项目状态**: 🟡 开发中
+**当前阶段**: 第一阶段代码完成，真机验收待执行
+**预计完成**: 真机验收及第二阶段技术评估后重新估算
 **责任人**: 您
 
 ---
