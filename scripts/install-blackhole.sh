@@ -1,0 +1,18 @@
+#!/bin/bash
+
+echo "BlackHole 虚拟音频设备安装脚本"
+echo "================================"
+echo ""
+echo "BlackHole 需要系统权限才能安装音频驱动。"
+echo ""
+echo "请在终端中手动运行以下命令："
+echo ""
+echo "  brew install blackhole-2ch"
+echo ""
+echo "安装完成后，验证安装："
+echo "  system_profiler SPAudioDataType | grep BlackHole"
+echo ""
+echo "或者手动下载安装包："
+echo "  curl -L https://github.com/ExistentialAudio/BlackHole/releases/download/v0.7.1/BlackHole2ch-0.7.1.pkg -o ~/Downloads/BlackHole.pkg"
+echo "  open ~/Downloads/BlackHole.pkg"
+echo ""

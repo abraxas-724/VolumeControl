@@ -42,7 +42,8 @@ class AudioRoutingPOC {
         let inputNode = engine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)
         
-        print("📥 输入设备: \(inputNode.name ?? "Unknown")")
+        let inputNodeName = inputNode.name(forInputBus: 0) ?? "Unknown"
+        print("📥 输入设备: \(inputNodeName)")
         print("📊 输入格式: \(inputFormat.sampleRate) Hz, \(inputFormat.channelCount) channels")
         
         // 2. 创建增益节点用于音量控制
@@ -52,7 +53,8 @@ class AudioRoutingPOC {
         
         // 3. 获取输出节点（到真实硬件）
         let outputNode = engine.outputNode
-        print("📤 输出设备: \(outputNode.name ?? "Unknown")")
+        let outputNodeName = outputNode.name(forOutputBus: 0) ?? "Unknown"
+        print("📤 输出设备: \(outputNodeName)")
         
         // 4. 连接音频图：输入 → 增益 → 输出
         engine.connect(inputNode, to: gainNode, format: inputFormat)
