@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "VolumeControl",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS(.v14)],
     products: [
         .executable(name: "VolumeControl", targets: ["VolumeControl"])
     ],
