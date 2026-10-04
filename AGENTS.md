@@ -4,6 +4,8 @@
 
 VolumeControl 是 macOS SwiftUI 状态栏音量控制工具。产品需要同时处理系统主音量、应用发现和可选的应用级音量控制。应用级音量必须经过能力探测，不能把不支持的应用伪装成可控制。
 
+**当前进度**：P0-P2 已完成，系统音量、静音、设备切换、应用发现和状态展示全部正常。P3 应用级音量控制尚未实现（macOS 公开 API 限制）。
+
 ## 目录约定
 
 - `Sources/VolumeControl/`：生产代码；按 Presentation、Application、Domain、Infrastructure 拆分文件。
