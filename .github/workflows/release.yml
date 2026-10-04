@@ -1,0 +1,32 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    runs-on: macos-14
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Get version from tag
+      id: version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+    
+    - name: Build release
+      run: swift build -c release
+    
+    - name: Create DMG
+      run: ./scripts/build-dmg.sh ${{ steps.version.outputs.VERSION }}
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: VolumeControl-*.dmg
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
