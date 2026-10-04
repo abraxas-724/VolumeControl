@@ -30,11 +30,13 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
-    <string>13.0</string>
+    <string>14.0</string>
     <key>LSUIElement</key>
     <true/>
 </dict>
 </plist>
 PLIST
+
+codesign --force --deep --sign - "$APP_DIR"
 
 echo "Built $APP_DIR"

@@ -22,6 +22,7 @@ struct VolumeControlApp: App {
 
 struct VolumePanel: View {
     @ObservedObject var model: VolumeControlModel
+    @AppStorage("showPercentage") private var showPercentage = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -60,6 +61,7 @@ struct VolumePanel: View {
                 Image(systemName: "arrow.clockwise")
             }
             .buttonStyle(.borderless)
+            .accessibilityLabel("刷新音频状态")
             .help("刷新音频状态")
         }
         .padding(.horizontal, 16)
@@ -72,9 +74,11 @@ struct VolumePanel: View {
                 Label("系统音量", systemImage: model.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
-                Text("\(Int(model.systemVolume * 100))%")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                if showPercentage {
+                    Text("\(Int(model.systemVolume * 100))%")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
             }
             HStack(spacing: 10) {
                 Button {
@@ -84,6 +88,7 @@ struct VolumePanel: View {
                         .frame(width: 24, height: 24)
                 }
                 .buttonStyle(.borderless)
+                .accessibilityLabel(model.isMuted ? "取消静音" : "静音")
                 .help(model.isMuted ? "取消静音" : "静音")
 
                 Slider(value: $model.systemVolume, in: 0...1) { editing in
@@ -135,6 +140,7 @@ struct VolumePanel: View {
                 Image(systemName: "gearshape")
             }
             .buttonStyle(.borderless)
+            .accessibilityLabel("设置")
             .help("设置")
         }
         .padding(.horizontal, 16)
@@ -171,6 +177,7 @@ private struct AppVolumeRow: View {
             } else {
                 Image(systemName: "info.circle")
                     .foregroundStyle(.secondary)
+                    .accessibilityLabel(app.capability.label)
                     .help(app.capability.label)
             }
         }
@@ -178,13 +185,52 @@ private struct AppVolumeRow: View {
     }
 }
 
+@MainActor
 struct SettingsView: View {
-    @AppStorage("launchAtLogin") private var launchAtLogin = false
+    @State private var launchAtLogin: Bool
+    @State private var loginItemStatus: LoginItemStatus
+    @State private var loginItemError: String?
     @AppStorage("showPercentage") private var showPercentage = true
+    private let loginItemController: any LoginItemControlling
+
+    @MainActor
+    init(loginItemController: (any LoginItemControlling)? = nil) {
+        let controller = loginItemController ?? SystemLoginItemController()
+        self.loginItemController = controller
+        let status = controller.status
+        _loginItemStatus = State(initialValue: status)
+        _launchAtLogin = State(initialValue: status.isRegistered)
+    }
 
     var body: some View {
         Form {
             Toggle("登录时启动", isOn: $launchAtLogin)
+                .onChange(of: launchAtLogin) { _, enabled in
+                    do {
+                        try loginItemController.setEnabled(enabled)
+                        loginItemStatus = loginItemController.status
+                        loginItemError = nil
+                        launchAtLogin = loginItemStatus.isRegistered
+                    } catch {
+                        loginItemStatus = loginItemController.status
+                        launchAtLogin = loginItemStatus.isRegistered
+                        loginItemError = error.localizedDescription
+                    }
+                }
+            if loginItemStatus == .requiresApproval {
+                Text("请在系统设置的登录项中允许 VolumeControl。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if loginItemStatus == .unavailable {
+                Text("请将应用放入“应用程序”文件夹后再启用登录启动。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let loginItemError {
+                Text(loginItemError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
             Toggle("显示音量百分比", isOn: $showPercentage)
             LabeledContent("版本", value: "0.1.0")
         }
