@@ -5,6 +5,12 @@ import SwiftUI
 struct VolumeControlApp: App {
     @StateObject private var model = VolumeControlModel()
 
+    init() {
+        if CommandLine.arguments.contains("--verify-process-audio") {
+            Task { await ProcessAudioValidationRunner.run(arguments: CommandLine.arguments) }
+        }
+    }
+
     var body: some Scene {
         MenuBarExtra {
             VolumePanel(model: model)
@@ -112,39 +118,19 @@ struct VolumePanel: View {
                 Text("应用音量")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
-                if model.blackHoleAvailable {
-                    if model.isEnablingRouting {
-                        Button("取消启动") {
-                            routingTask?.cancel()
-                            model.disableV2()
-                        }
-                        .font(.caption)
-                    } else if model.isV2Enabled {
-                        Button("停止路由验证") { model.disableV2() }
-                            .font(.caption)
-                            .buttonStyle(.bordered)
-                    } else {
-                        Button("验证音频路由") {
-                            routingTask = Task { await model.enableV2() }
-                        }
-                        .font(.caption)
-                        .buttonStyle(.bordered)
-                    }
-                } else {
-                    Button("安装 BlackHole") {
-                        showInstallSheet = true
-                    }
-                    .font(.caption)
-                    .buttonStyle(.bordered)
-                }
                 Text("\(model.apps.count)")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
 
-            Text("应用独立音量尚未实现。BlackHole 仅用于混合音频路由验证。")
+            Text("播放音频后点击应用旁的启用按钮。首次需要允许系统音频录制。")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+
+            if model.hasAppAudioControl {
+                Button("停止应用音量控制") { model.stopAppAudioControl() }
+                    .font(.caption)
+            }
 
             if model.apps.isEmpty {
                 ContentUnavailableView("暂无运行中的应用", systemImage: "app.dashed", description: Text("打开应用后点击刷新"))
@@ -160,6 +146,36 @@ struct VolumePanel: View {
                 }
                 .frame(maxHeight: 260)
             }
+            DisclosureGroup("高级路由测试") {
+                HStack {
+                    if model.blackHoleAvailable {
+                        if model.isEnablingRouting {
+                            Button("取消启动") {
+                                routingTask?.cancel()
+                                model.disableV2()
+                            }
+                            .font(.caption)
+                        } else if model.isV2Enabled {
+                            Button("停止路由验证") { model.disableV2() }
+                                .font(.caption)
+                                .buttonStyle(.bordered)
+                        } else {
+                            Button("验证音频路由") {
+                                routingTask = Task { await model.enableV2() }
+                            }
+                            .font(.caption)
+                            .buttonStyle(.bordered)
+                        }
+                    } else {
+                        Button("安装 BlackHole") {
+                            showInstallSheet = true
+                        }
+                        .font(.caption)
+                        .buttonStyle(.bordered)
+                    }
+                }
+            }
+            .font(.caption)
         }
         .padding(16)
     }
@@ -186,6 +202,7 @@ struct VolumePanel: View {
 private struct AppVolumeRow: View {
     let app: AppVolume
     @ObservedObject var model: VolumeControlModel
+    @State private var activationTask: Task<Void, Never>?
 
     var body: some View {
         HStack(spacing: 10) {
@@ -204,21 +221,37 @@ private struct AppVolumeRow: View {
                 Button {
                     model.toggleAppMute(id: app.id)
                 } label: {
-                    Image(systemName: "speaker.slash")
+                    Image(systemName: app.isMuted ? "speaker.slash.fill" : "speaker.wave.2")
                         .frame(width: 20, height: 20)
                 }
                 .buttonStyle(.borderless)
-                .accessibilityLabel("静音")
-                .help("静音此应用")
+                .accessibilityLabel(app.isMuted ? "取消应用静音" : "静音应用")
+                .help(app.isMuted ? "取消应用静音" : "静音此应用")
                 
                 Slider(value: Binding(
                     get: { app.volume },
                     set: { model.setAppVolume(id: app.id, volume: $0) }
                 ), in: 0...1)
                 .frame(width: 80)
+                Button { model.disableAppVolume(id: app.id) } label: { Image(systemName: "stop.circle") }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("停止 \(app.name) 应用音量控制")
+                    .help("恢复此应用的原始播放")
                 Text("\(Int(app.volume * 100))")
                     .font(.caption.monospacedDigit())
                     .frame(width: 28, alignment: .trailing)
+            } else if app.isPreparing {
+                Button { activationTask?.cancel() } label: { Image(systemName: "xmark.circle") }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("取消启用应用音量")
+                ProgressView().controlSize(.small)
+            } else if app.canActivate {
+                Button {
+                    activationTask = Task { await model.enableAppVolume(id: app.id) }
+                } label: { Image(systemName: "slider.horizontal.3") }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("启用 \(app.name) 应用音量")
+                .help("保持播放音频，启用独立音量")
             } else {
                 Image(systemName: "info.circle")
                     .foregroundStyle(.secondary)
@@ -227,6 +260,7 @@ private struct AppVolumeRow: View {
             }
         }
         .padding(.vertical, 6)
+        .onDisappear { activationTask?.cancel() }
     }
 }
 
@@ -277,7 +311,7 @@ struct SettingsView: View {
                     .foregroundStyle(.red)
             }
             Toggle("显示音量百分比", isOn: $showPercentage)
-            LabeledContent("版本", value: "0.1.0")
+            LabeledContent("版本", value: "2.0.0-beta.1")
         }
         .padding(20)
         .frame(width: 360)

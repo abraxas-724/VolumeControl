@@ -26,11 +26,13 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>2.0.0</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>20001</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>捕获您启用的应用音频，应用独立音量和静音后播放到当前输出设备。音频不会录制为文件或上传。</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>音频路由验证需要读取 BlackHole 虚拟音频输入并转发到您选择的输出设备。</string>
     <key>LSUIElement</key>

@@ -24,17 +24,22 @@ struct WorkspaceApplicationProvider: ApplicationProvider {
     private let detector = AudioProcessDetector()
 
     func applications(excluding bundleID: String?) -> [DiscoveredApplication] {
-        let processResult = Result { Set(try detector.processes().map(\.processID)) }
+        let processResult = Result { try detector.processes() }
+        var seenBundles: Set<String> = []
         return NSWorkspace.shared.runningApplications
             .filter { application in
                 application.activationPolicy == .regular && application.bundleIdentifier != bundleID
             }
+            .sorted { $0.processIdentifier < $1.processIdentifier }
             .compactMap { application in
-                guard let bundleID = application.bundleIdentifier else { return nil }
+                guard let bundleID = application.bundleIdentifier, seenBundles.insert(bundleID).inserted else { return nil }
                 let audioSessionStatus: AudioSessionStatus
                 switch processResult {
-                case .success(let processIDs):
-                    audioSessionStatus = processIDs.contains(application.processIdentifier) ? .detected : .notDetected
+                case .success(let processes):
+                    let target = AppAudioTarget(bundleID: bundleID, processID: application.processIdentifier)
+                    audioSessionStatus = processes.contains {
+                        AudioProcessFamily.matches(processID: $0.processID, bundleID: $0.bundleID, target: target, parent: AudioProcessFamily.parentProcessID)
+                    } ? .detected : .notDetected
                 case .failure(let error):
                     audioSessionStatus = .unavailable(error.localizedDescription)
                 }
@@ -51,6 +56,7 @@ struct WorkspaceApplicationProvider: ApplicationProvider {
 }
 
 struct AudioProcess {
+    let objectID: AudioObjectID
     let processID: pid_t
     let bundleID: String?
 }
@@ -103,7 +109,7 @@ struct AudioProcessDetector {
         guard bundleStatus == noErr else {
             throw AudioServiceError.operationFailed(operation: "读取进程音频会话 Bundle ID", status: bundleStatus)
         }
-        let bundle = bundleID?.takeUnretainedValue() as String?
-        return AudioProcess(processID: processID, bundleID: bundle)
+        let bundle = bundleID?.takeRetainedValue() as String?
+        return AudioProcess(objectID: objectID, processID: processID, bundleID: bundle)
     }
 }

@@ -32,9 +32,12 @@ struct AppVolume: Identifiable, Equatable {
     let icon: NSImage
     var volume: Double
     var capability: AppAudioCapability
+    var isMuted = false
+    var canActivate = false
+    var isPreparing = false
 
     static func == (lhs: AppVolume, rhs: AppVolume) -> Bool {
-        lhs.id == rhs.id && lhs.name == rhs.name && lhs.volume == rhs.volume && lhs.capability == rhs.capability
+        lhs.id == rhs.id && lhs.name == rhs.name && lhs.volume == rhs.volume && lhs.capability == rhs.capability && lhs.isMuted == rhs.isMuted && lhs.canActivate == rhs.canActivate && lhs.isPreparing == rhs.isPreparing
     }
 }
 
@@ -53,6 +56,9 @@ final class VolumeControlModel: ObservableObject {
     private let applicationProvider: any ApplicationProvider
     private var deviceMonitor: AudioDeviceMonitor?
     
+    private let appAudio: any AppAudioControlling
+    private var discoveredApplications: [DiscoveredApplication] = []
+    private var preparingApps: Set<String> = []
     private var audioRouter: any AudioRouting
     private let inputPermission: any AudioInputPermissionProviding
     private var enableRequestID = 0
@@ -65,19 +71,24 @@ final class VolumeControlModel: ObservableObject {
         applicationProvider: any ApplicationProvider = WorkspaceApplicationProvider(),
         audioRouter: (any AudioRouting)? = nil,
         monitorDevices: Bool = true,
-        inputPermission: any AudioInputPermissionProviding = AudioInputPermission()
+        inputPermission: any AudioInputPermissionProviding = AudioInputPermission(),
+        appAudio: (any AppAudioControlling)? = nil
     ) {
         self.audio = audio
         self.applicationProvider = applicationProvider
         self.audioRouter = audioRouter ?? AudioDeviceRouter()
         self.inputPermission = inputPermission
+        self.appAudio = appAudio ?? ProcessTapVolumeController()
         systemVolume = 0
         if monitorDevices {
             deviceMonitor = AudioDeviceMonitor { [weak self] in self?.refresh() }
             terminationObserver = NotificationCenter.default.addObserver(
                 forName: NSApplication.willTerminateNotification, object: nil, queue: .main
             ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.disableV2() }
+                MainActor.assumeIsolated {
+                    self?.disableV2()
+                    self?.stopAppAudioControl()
+                }
             }
         }
         self.audioRouter.onFailure = { [weak self] error in
@@ -88,6 +99,7 @@ final class VolumeControlModel: ObservableObject {
                 self.refresh()
             }
         }
+        self.appAudio.onChange = { [weak self] in self?.publishApplications() }
         refresh()
     }
 
@@ -97,28 +109,9 @@ final class VolumeControlModel: ObservableObject {
 
     func refresh() {
         let audioError = refreshSystemAudio()
-        let discovered = applicationProvider.applications(excluding: Bundle.main.bundleIdentifier)
-        apps = discovered.map { application in
-            let capability: AppAudioCapability
-            
-            // BlackHole 提供混合流，发现进程会话不能证明存在独立增益通道。
-            switch application.audioSessionStatus {
-            case .detected:
-                capability = .unsupported("系统接口不支持应用增益")
-            case .notDetected:
-                capability = .noAudioSession
-            case .unavailable(let reason):
-                capability = .unsupported("无法检测音频会话：\(reason)")
-            }
-
-            return AppVolume(
-                id: "\(application.bundleID):\(application.processID)",
-                name: application.name,
-                icon: application.icon,
-                volume: 1.0,
-                capability: capability
-            )
-        }
+        discoveredApplications = applicationProvider.applications(excluding: Bundle.main.bundleIdentifier)
+        appAudio.reconcile(Set(discoveredApplications.map { AppAudioTarget(bundleID: $0.bundleID, processID: $0.processID) }))
+        publishApplications()
         do { blackHoleAvailable = try audioRouter.isBlackHoleAvailable() }
         catch {
             blackHoleAvailable = false
@@ -130,11 +123,68 @@ final class VolumeControlModel: ObservableObject {
             statusMessage = "音频路由验证运行中；尚不支持应用独立音量"
         } else if let audioError {
             statusMessage = audioError
+        } else if apps.contains(where: { $0.capability.isSupported }) {
+            statusMessage = "已启用 \(apps.filter { $0.capability.isSupported }.count) 个应用的独立音量"
         } else if apps.isEmpty {
             statusMessage = "打开应用后点击刷新"
         } else {
             statusMessage = "已发现 \(apps.count) 个运行中的应用"
         }
+    }
+
+    private func publishApplications() {
+        apps = discoveredApplications.map { application in
+            let target = AppAudioTarget(bundleID: application.bundleID, processID: application.processID)
+            let state = appAudio.state(for: target)
+            let capability: AppAudioCapability
+            switch application.audioSessionStatus {
+            case .detected: capability = state.capability
+            case .notDetected: capability = state.capability.isSupported ? state.capability : .noAudioSession
+            case .unavailable(let reason): capability = .unsupported("无法检测音频会话：\(reason)")
+            }
+            return AppVolume(
+                id: target.id, name: application.name, icon: application.icon,
+                volume: Double(state.preferences.volume), capability: capability,
+                isMuted: state.preferences.isMuted,
+                canActivate: application.audioSessionStatus == .detected && appAudio.availability.isSupported && !state.capability.isSupported && !isV2Enabled && !isEnablingRouting,
+                isPreparing: preparingApps.contains(target.id)
+            )
+        }
+    }
+
+    var hasAppAudioControl: Bool { appAudio.isActive || !preparingApps.isEmpty }
+
+    func enableAppVolume(id: String) async {
+        guard let application = discoveredApplications.first(where: { "\($0.bundleID):\($0.processID)" == id }),
+              !preparingApps.contains(id), !isV2Enabled, !isEnablingRouting else { return }
+        let target = AppAudioTarget(bundleID: application.bundleID, processID: application.processID)
+        preparingApps.insert(id)
+        publishApplications()
+        defer { preparingApps.remove(id); publishApplications() }
+        do {
+            try await appAudio.activate(target)
+            statusMessage = "\(application.name) 应用音量已启用"
+        } catch is CancellationError {
+            statusMessage = "已取消启用应用音量"
+        } catch { statusMessage = error.localizedDescription }
+    }
+
+    func disableAppVolume(id: String) {
+        guard let target = target(for: id) else { return }
+        do {
+            try appAudio.deactivate(target)
+            statusMessage = "已恢复该应用的原始播放"
+        } catch { statusMessage = error.localizedDescription }
+        publishApplications()
+    }
+
+    func stopAppAudioControl() {
+        do {
+            try appAudio.stopAll()
+            routingError = nil
+            statusMessage = "已停止应用音量控制，恢复原始播放"
+        } catch { routingError = error.localizedDescription; statusMessage = error.localizedDescription }
+        publishApplications()
     }
 
     func refreshLoop() async {
@@ -165,21 +215,38 @@ final class VolumeControlModel: ObservableObject {
     }
 
     func setAppVolume(id: String, volume: Double) {
-        guard let app = apps.first(where: { $0.id == id }) else { return }
-        statusMessage = app.capability.label
+        guard let app = apps.first(where: { $0.id == id }), app.capability.isSupported,
+              let target = target(for: id) else { return }
+        do {
+            guard volume.isFinite else { throw AppAudioError.invalidVolume }
+            try appAudio.setVolume(Float(min(max(volume, 0), 1)), for: target)
+            publishApplications()
+            statusMessage = "\(app.name) 音量已更新"
+        } catch { statusMessage = error.localizedDescription }
     }
 
     func toggleAppMute(id: String) {
-        guard let app = apps.first(where: { $0.id == id }) else { return }
-        statusMessage = app.capability.label
+        guard let app = apps.first(where: { $0.id == id }), app.capability.isSupported,
+              let target = target(for: id) else { return }
+        do {
+            try appAudio.setMuted(!app.isMuted, for: target)
+            publishApplications()
+            statusMessage = app.isMuted ? "\(app.name) 已取消静音" : "\(app.name) 已静音"
+        } catch { statusMessage = error.localizedDescription }
+    }
+
+    private func target(for id: String) -> AppAudioTarget? {
+        discoveredApplications.map { AppAudioTarget(bundleID: $0.bundleID, processID: $0.processID) }.first { $0.id == id }
     }
 
     func enableV2() async {
         guard !isEnablingRouting, !isV2Enabled else { return }
+        guard !hasAppAudioControl else { statusMessage = "请先停止应用音量控制，再验证 BlackHole 路由"; return }
         isEnablingRouting = true
+        publishApplications()
         enableRequestID += 1
         let request = enableRequestID
-        defer { isEnablingRouting = false }
+        defer { isEnablingRouting = false; publishApplications() }
         do {
             guard try audioRouter.isBlackHoleAvailable() else { throw AudioRoutingError.blackHoleNotFound }
             let allowed = try await inputPermission.requestAccess()

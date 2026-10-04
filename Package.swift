@@ -8,13 +8,15 @@ let package = Package(
         .executable(name: "VolumeControl", targets: ["VolumeControl"])
     ],
     targets: [
+        .target(name: "VolumeControlDSP", path: "Sources/VolumeControlDSP", publicHeadersPath: "include"),
         .executableTarget(
             name: "VolumeControl",
+            dependencies: ["VolumeControlDSP"],
             path: "Sources/VolumeControl"
         ),
         .testTarget(
             name: "VolumeControlTests",
-            dependencies: ["VolumeControl"],
+            dependencies: ["VolumeControl", "VolumeControlDSP"],
             path: "Tests/VolumeControlTests"
         )
     ]

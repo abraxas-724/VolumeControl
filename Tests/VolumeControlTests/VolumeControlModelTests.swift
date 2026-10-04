@@ -46,7 +46,7 @@ struct FakeApplicationProvider: ApplicationProvider {
 @MainActor
 final class VolumeControlModelTests: XCTestCase {
     private func makeModel(audio: any AudioService, applicationProvider: any ApplicationProvider) -> VolumeControlModel {
-        VolumeControlModel(audio: audio, applicationProvider: applicationProvider, audioRouter: ModelRoutingStub(), monitorDevices: false, inputPermission: ModelPermissionStub())
+        VolumeControlModel(audio: audio, applicationProvider: applicationProvider, audioRouter: ModelRoutingStub(), monitorDevices: false, inputPermission: ModelPermissionStub(), appAudio: UnsupportedAppAudioControl())
     }
 
     func testLoginItemRegistrationStates() {
@@ -109,7 +109,7 @@ final class VolumeControlModelTests: XCTestCase {
         )
         let model = VolumeControlModel(
             audio: FakeAudioService(), applicationProvider: FakeApplicationProvider(values: [application]),
-            audioRouter: router, monitorDevices: false, inputPermission: ModelPermissionStub()
+            audioRouter: router, monitorDevices: false, inputPermission: ModelPermissionStub(), appAudio: UnsupportedAppAudioControl()
         )
         await model.enableV2()
         XCTAssertTrue(model.isV2Enabled)
@@ -128,7 +128,7 @@ final class VolumeControlModelTests: XCTestCase {
         router.startError = AudioRoutingError.engineFailed("启动失败")
         let model = VolumeControlModel(
             audio: FakeAudioService(), applicationProvider: FakeApplicationProvider(values: []),
-            audioRouter: router, monitorDevices: false, inputPermission: ModelPermissionStub()
+            audioRouter: router, monitorDevices: false, inputPermission: ModelPermissionStub(), appAudio: UnsupportedAppAudioControl()
         )
         await model.enableV2()
         model.refresh()
@@ -148,7 +148,7 @@ final class VolumeControlModelTests: XCTestCase {
         router.available = true
         let model = VolumeControlModel(
             audio: FakeAudioService(), applicationProvider: FakeApplicationProvider(values: []),
-            audioRouter: router, monitorDevices: false, inputPermission: ModelPermissionStub(allowed: false)
+            audioRouter: router, monitorDevices: false, inputPermission: ModelPermissionStub(allowed: false), appAudio: UnsupportedAppAudioControl()
         )
         await model.enableV2()
         XCTAssertFalse(router.isRouting)
@@ -164,7 +164,7 @@ final class VolumeControlModelTests: XCTestCase {
         permission.onRequest = { requested.fulfill() }
         let model = VolumeControlModel(
             audio: FakeAudioService(), applicationProvider: FakeApplicationProvider(values: []),
-            audioRouter: router, monitorDevices: false, inputPermission: permission
+            audioRouter: router, monitorDevices: false, inputPermission: permission, appAudio: UnsupportedAppAudioControl()
         )
         let task = Task { await model.enableV2() }
         await fulfillment(of: [requested], timeout: 1)
@@ -183,7 +183,7 @@ final class VolumeControlModelTests: XCTestCase {
         router.available = true
         let model = VolumeControlModel(
             audio: FakeAudioService(), applicationProvider: FakeApplicationProvider(values: []),
-            audioRouter: router, monitorDevices: false, inputPermission: ModelPermissionStub()
+            audioRouter: router, monitorDevices: false, inputPermission: ModelPermissionStub(), appAudio: UnsupportedAppAudioControl()
         )
         await model.enableV2()
         router.isRouting = false
@@ -269,4 +269,18 @@ final class DeferredPermissionStub: AudioInputPermissionProviding {
         continuation?.resume(returning: true)
         continuation = nil
     }
+}
+
+@MainActor
+final class UnsupportedAppAudioControl: AppAudioControlling {
+    var availability: AppAudioCapability = .unsupported("系统接口不支持应用增益")
+    var onChange: (() -> Void)?
+    var isActive: Bool { false }
+    func state(for target: AppAudioTarget) -> AppAudioControlState { AppAudioControlState(capability: availability) }
+    func activate(_ target: AppAudioTarget) async throws { throw AppAudioError.unavailable(availability.label) }
+    func deactivate(_ target: AppAudioTarget) throws {}
+    func setVolume(_ value: Float, for target: AppAudioTarget) throws { throw AppAudioError.noSession }
+    func setMuted(_ muted: Bool, for target: AppAudioTarget) throws { throw AppAudioError.noSession }
+    func reconcile(_ targets: Set<AppAudioTarget>) {}
+    func stopAll() throws {}
 }

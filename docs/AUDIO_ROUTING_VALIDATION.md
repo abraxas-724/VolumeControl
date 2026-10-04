@@ -2,6 +2,8 @@
 
 更新日期：2026-10-04。状态：Task 1.1/1.2 代码及模拟验证完成；Task 1.3 真机验收未完成。
 
+原生应用独立音量已在后续阶段通过 Process Tap 实现并完成两进程真机闭环，详见 [应用音量验收记录](PROCESS_TAP_VALIDATION.md)。本页保留 BlackHole 混合流实验结果，不代表当前应用控制能力。
+
 ## 发现的问题
 
 原 `AudioDeviceRouter` 只切换默认输出并启动空的 AVAudioEngine，没有绑定 BlackHole 输入、真实设备输出或转发 buffer。原模型把“检测到进程音频会话”当作独立增益能力，原 README 中的独立控制和性能数字没有对应验收证据。

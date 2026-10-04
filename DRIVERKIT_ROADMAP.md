@@ -1,6 +1,6 @@
 # VolumeControl DriverKit 开发路线图
 
-> 2026-10-04 核验说明：本文保留早期研究与伪代码，不代表已创建可编译的 DriverKit 项目。AudioDriverKit 虚拟设备路径、客户端/PID 接口与签名权限尚未验证。下一阶段先评估 Process Tap / Audio Server Plug-in，详见 [当前验证记录](docs/AUDIO_ROUTING_VALIDATION.md#下一阶段技术门槛)。
+> 2026-10-04 核验说明：本文保留早期研究与伪代码，不代表已创建可编译的 DriverKit 项目。AudioDriverKit 虚拟设备路径、客户端/PID 接口与签名权限尚未验证。当前已完成无需驱动的原生 Process Tap 应用音量 beta 及两进程真机验收；扩大兼容性后再评估辅助组件，详见 [当前验证记录](docs/PROCESS_TAP_VALIDATION.md)。
 
 
 ## 项目目标
