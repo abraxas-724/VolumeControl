@@ -35,7 +35,13 @@ struct VolumePanel: View {
         }
         .frame(width: 340)
         .padding(.vertical, 8)
-        .task { model.refresh() }
+        .task { await model.refreshLoop() }
+        .onReceive(NotificationCenter.default.publisher(for: NSWorkspace.didLaunchApplicationNotification)) { _ in
+            model.refresh()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWorkspace.didTerminateApplicationNotification)) { _ in
+            model.refresh()
+        }
     }
 
     private var header: some View {
@@ -150,7 +156,7 @@ private struct AppVolumeRow: View {
                     .lineLimit(1)
                 Text(app.capability.label)
                     .font(.caption2)
-                    .foregroundStyle(app.capability.isSupported ? .secondary : .orange)
+                    .foregroundStyle(app.capability.isSupported ? Color.secondary : Color.orange)
             }
             Spacer(minLength: 4)
             if app.capability.isSupported {

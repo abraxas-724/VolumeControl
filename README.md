@@ -4,12 +4,12 @@ VolumeControl 是一个原生 macOS 状态栏音量控制工具。它把系统�
 
 ## 项目状态
 
-当前版本是 P0/P1 的可评审骨架：
+当前版本已完成 P0，并完成 P1/P2 的基础能力：
 
 - 已有 SwiftUI `MenuBarExtra` 状态栏入口。
-- 已有系统音量滑杆、静音交互、设备名称占位和设置入口。
-- 已有运行中应用的图标、名称和能力状态展示。
-- 应用级音量目前显示能力探测状态，尚未对所有应用启用进程级写入。
+- 已有系统音量滑杆、硬件静音交互、真实默认输出设备名称和设置入口。
+- 已有运行中应用的图标、名称和 Core Audio 音频会话能力状态展示。
+- 应用级音量目前只对能力探针确认支持的会话开放；macOS 公共接口不支持的应用会明确提示原因。
 - 详细产品计划见 [PROJECT_PLAN.md](PROJECT_PLAN.md)，详细技术设计见 [PRODUCT_TECHNICAL_SOLUTION.md](PRODUCT_TECHNICAL_SOLUTION.md)。
 
 ## 产品能力
@@ -25,10 +25,9 @@ VolumeControl 是一个原生 macOS 状态栏音量控制工具。它把系统�
 
 ### 开发中
 
-- Core Audio 默认输出设备读取和设备变化监听。
-- 应用音频会话能力探针。
 - 支持应用的进程级音量和静音读写。
 - 可选虚拟音频设备/辅助组件，用于覆盖不暴露进程级增益的应用。
+- 应用级音频写入的安全回滚和更细粒度的刷新去重。
 
 ## 技术架构
 
@@ -55,7 +54,7 @@ UI 不直接调用 Core Audio。系统音量和应用音量通过仓储协议隔
 - Apple Silicon 优先；Intel Mac 可作为兼容性测试目标。
 - Git 和 GitHub CLI（仅在需要推送仓库时需要）。
 
-当前开发环境若只有 Command Line Tools，可能出现 Swift 编译器与 SDK 版本不匹配；这不会影响代码语法检查，但需要安装完整 Xcode 才能生成签名应用。
+当前开发环境若只有 Command Line Tools，可能无法解析 XCTest 模块；需要安装完整 Xcode 才能运行测试、生成签名应用和完成真机验收。
 
 ## 快速开始
 
@@ -65,6 +64,8 @@ UI 不直接调用 Core Audio。系统音量和应用音量通过仓储协议隔
 swift build
 swift test
 ```
+
+`swift build` 用于验证生产目标；`swift test` 需要完整 Xcode 提供 XCTest SDK。
 
 ### 生成未签名应用
 

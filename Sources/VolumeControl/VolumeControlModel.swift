@@ -3,6 +3,8 @@ import Foundation
 
 enum AppAudioCapability: Equatable {
     case supported
+    case noAudioSession
+    case permissionRequired
     case unsupported(String)
 
     var isSupported: Bool {
@@ -12,8 +14,14 @@ enum AppAudioCapability: Equatable {
 
     var label: String {
         switch self {
-        case .supported: return "可调节"
-        case .unsupported(let reason): return reason
+        case .supported:
+            return "可调节"
+        case .noAudioSession:
+            return "未检测到音频输出"
+        case .permissionRequired:
+            return "需要音频权限"
+        case .unsupported(let reason):
+            return reason
         }
     }
 }
@@ -36,79 +44,92 @@ final class VolumeControlModel: ObservableObject {
     @Published private(set) var isMuted = false
     @Published private(set) var apps: [AppVolume] = []
     @Published private(set) var outputDeviceName = "默认输出设备"
-    @Published private(set) var statusMessage = "应用级音量控制正在探测支持情况"
+    @Published private(set) var statusMessage = "正在探测音频状态"
 
-    private let audio = SystemAudioService()
-    private var volumeBeforeMute = 0.5
+    private let audio: any AudioService
+    private let applicationProvider: any ApplicationProvider
+    private var deviceMonitor: AudioDeviceMonitor?
 
-    init() {
-        systemVolume = audio.readSystemVolume()
+    init(
+        audio: any AudioService = CoreAudioService(),
+        applicationProvider: any ApplicationProvider = WorkspaceApplicationProvider()
+    ) {
+        self.audio = audio
+        self.applicationProvider = applicationProvider
+        systemVolume = 0
+        deviceMonitor = nil
+        deviceMonitor = AudioDeviceMonitor { [weak self] in
+            self?.refresh()
+        }
         refresh()
     }
 
     func refresh() {
-        systemVolume = audio.readSystemVolume()
-        isMuted = audio.readMuted()
-        outputDeviceName = audio.outputDeviceName()
-        apps = NSWorkspace.shared.runningApplications
-            .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != Bundle.main.bundleIdentifier }
-            .compactMap { application in
-                guard let bundleID = application.bundleIdentifier else { return nil }
-                return AppVolume(
-                    id: bundleID,
-                    name: application.localizedName ?? bundleID,
-                    icon: application.icon ?? NSImage(systemSymbolName: "app", accessibilityDescription: nil)!,
-                    volume: 1,
-                    capability: .unsupported("需要音频会话支持")
-                )
-            }
-            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        statusMessage = apps.isEmpty ? "打开应用后点击刷新" : "当前版本正在接入应用级音频控制"
+        refreshSystemAudio()
+        let discovered = applicationProvider.applications(excluding: Bundle.main.bundleIdentifier)
+        apps = discovered.map { application in
+            let capability: AppAudioCapability = application.hasAudioSession
+                ? .unsupported("系统接口不支持应用增益")
+                : .noAudioSession
+            return AppVolume(
+                id: "\(application.bundleID):\(application.processID)",
+                name: application.name,
+                icon: application.icon,
+                volume: 1,
+                capability: capability
+            )
+        }
+        if apps.isEmpty {
+            statusMessage = "打开应用后点击刷新"
+        } else if statusMessage == "正在探测音频状态" {
+            statusMessage = "已发现 \(apps.count) 个运行中的应用"
+        }
+    }
+
+    func refreshLoop() async {
+        while !Task.isCancelled {
+            refresh()
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+        }
     }
 
     func commitSystemVolume() {
-        audio.writeSystemVolume(systemVolume)
+        do {
+            try audio.writeSystemVolume(systemVolume)
+            statusMessage = "系统音量已更新"
+        } catch {
+            statusMessage = error.localizedDescription
+            systemVolume = (try? audio.readSystemVolume()) ?? systemVolume
+        }
     }
 
     func toggleMute() {
-        if isMuted {
-            systemVolume = volumeBeforeMute
-            isMuted = false
-        } else {
-            volumeBeforeMute = max(systemVolume, 0.5)
-            systemVolume = 0
-            isMuted = true
+        do {
+            try audio.writeMuted(!isMuted)
+            isMuted.toggle()
+            statusMessage = isMuted ? "系统已静音" : "已取消静音"
+        } catch {
+            statusMessage = error.localizedDescription
         }
-        commitSystemVolume()
     }
 
     func setAppVolume(id: String, volume: Double) {
-        guard let index = apps.firstIndex(where: { $0.id == id }) else { return }
-        apps[index].volume = volume
+        guard let index = apps.firstIndex(where: { $0.id == id }), apps[index].capability.isSupported else { return }
+        apps[index].volume = Self.clamped(volume)
     }
-}
 
-struct SystemAudioService {
-    static func clamped(_ value: Double) -> Double {
+    private func refreshSystemAudio() {
+        do {
+            systemVolume = Self.clamped(try audio.readSystemVolume())
+            isMuted = try audio.readMuted()
+            outputDeviceName = try audio.outputDeviceName()
+        } catch {
+            outputDeviceName = "输出设备不可用"
+            statusMessage = error.localizedDescription
+        }
+    }
+
+    private static func clamped(_ value: Double) -> Double {
         min(max(value, 0), 1)
-    }
-
-    func readSystemVolume() -> Double {
-        Double(NSSound.systemVolume)
-    }
-
-    func writeSystemVolume(_ value: Double) {
-        NSSound.systemVolume = Float(Self.clamped(value))
-    }
-
-    func readMuted() -> Bool { false }
-
-    func writeMuted(_ muted: Bool) {
-        // NSSound does not expose a public mute setter; Core Audio integration lands in P1.
-        _ = muted
-    }
-
-    func outputDeviceName() -> String {
-        "默认输出设备"
     }
 }
