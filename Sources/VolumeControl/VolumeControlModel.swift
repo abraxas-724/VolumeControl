@@ -128,12 +128,17 @@ final class VolumeControlModel: ObservableObject {
 
     private func refreshSystemAudio() -> String? {
         do {
-            systemVolume = Self.clamped(try audio.readSystemVolume())
-            isMuted = try audio.readMuted()
             outputDeviceName = try audio.outputDeviceName()
-            return nil
         } catch {
             outputDeviceName = "输出设备不可用"
+            return error.localizedDescription
+        }
+
+        do {
+            systemVolume = Self.clamped(try audio.readSystemVolume())
+            isMuted = try audio.readMuted()
+            return nil
+        } catch {
             return error.localizedDescription
         }
     }
