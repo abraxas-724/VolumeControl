@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import OSLog
 
 enum AppAudioCapability: Equatable {
     case supported
@@ -51,6 +52,7 @@ final class VolumeControlModel: ObservableObject {
     @Published private(set) var isV2Enabled = false
     @Published private(set) var blackHoleAvailable = false
     @Published private(set) var isEnablingRouting = false
+    @Published private(set) var lastError: String?
 
     private let audio: any AudioService
     private let applicationProvider: any ApplicationProvider
@@ -59,6 +61,8 @@ final class VolumeControlModel: ObservableObject {
     private let appAudio: any AppAudioControlling
     private var discoveredApplications: [DiscoveredApplication] = []
     private var preparingApps: Set<String> = []
+    private var activationTasks: [String: Task<Void, Never>] = [:]
+    private var routingTask: Task<Void, Never>?
     private var audioRouter: any AudioRouting
     private let inputPermission: any AudioInputPermissionProviding
     private var enableRequestID = 0
@@ -96,6 +100,7 @@ final class VolumeControlModel: ObservableObject {
                 guard let self else { return }
                 self.isV2Enabled = false
                 self.routingError = error.localizedDescription
+                self.report(error)
                 self.refresh()
             }
         }
@@ -104,6 +109,8 @@ final class VolumeControlModel: ObservableObject {
     }
 
     deinit {
+        activationTasks.values.forEach { $0.cancel() }
+        routingTask?.cancel()
         if let terminationObserver { NotificationCenter.default.removeObserver(terminationObserver) }
     }
 
@@ -154,6 +161,38 @@ final class VolumeControlModel: ObservableObject {
 
     var hasAppAudioControl: Bool { appAudio.isActive || !preparingApps.isEmpty }
 
+    // Permission prompts dismiss MenuBarExtra; hiding a view must not cancel an explicit request.
+    @discardableResult
+    func startAppVolume(id: String) -> Task<Void, Never>? {
+        guard activationTasks[id] == nil else { return nil }
+        let task = Task { [weak self] in
+            await self?.enableAppVolume(id: id)
+            self?.activationTasks[id] = nil
+        }
+        activationTasks[id] = task
+        return task
+    }
+
+    func cancelAppVolume(id: String) { activationTasks[id]?.cancel() }
+
+    func startRoutingValidation() {
+        guard routingTask == nil else { return }
+        routingTask = Task { [weak self] in
+            await self?.enableV2()
+            self?.routingTask = nil
+        }
+    }
+
+    func cancelRoutingValidation() { routingTask?.cancel(); disableV2() }
+
+    func dismissError() { lastError = nil }
+
+    private func report(_ error: Error) {
+        lastError = error.localizedDescription
+        statusMessage = error.localizedDescription
+        Logger(subsystem: "com.volumecontrol.app", category: "audio-control").error("\(error.localizedDescription, privacy: .public)")
+    }
+
     func enableAppVolume(id: String) async {
         guard let application = discoveredApplications.first(where: { "\($0.bundleID):\($0.processID)" == id }),
               !preparingApps.contains(id), !isV2Enabled, !isEnablingRouting else { return }
@@ -163,10 +202,11 @@ final class VolumeControlModel: ObservableObject {
         defer { preparingApps.remove(id); publishApplications() }
         do {
             try await appAudio.activate(target)
+            lastError = nil
             statusMessage = "\(application.name) 应用音量已启用"
         } catch is CancellationError {
             statusMessage = "已取消启用应用音量"
-        } catch { statusMessage = error.localizedDescription }
+        } catch { report(error) }
     }
 
     func disableAppVolume(id: String) {
@@ -174,16 +214,18 @@ final class VolumeControlModel: ObservableObject {
         do {
             try appAudio.deactivate(target)
             statusMessage = "已恢复该应用的原始播放"
-        } catch { statusMessage = error.localizedDescription }
+        } catch { report(error) }
         publishApplications()
     }
 
     func stopAppAudioControl() {
+        activationTasks.values.forEach { $0.cancel() }
         do {
             try appAudio.stopAll()
             routingError = nil
+            lastError = nil
             statusMessage = "已停止应用音量控制，恢复原始播放"
-        } catch { routingError = error.localizedDescription; statusMessage = error.localizedDescription }
+        } catch { routingError = error.localizedDescription; report(error) }
         publishApplications()
     }
 
@@ -200,6 +242,7 @@ final class VolumeControlModel: ObservableObject {
             statusMessage = "系统音量已更新"
         } catch {
             statusMessage = error.localizedDescription
+            lastError = error.localizedDescription
             systemVolume = (try? audio.readSystemVolume()) ?? systemVolume
         }
     }
@@ -210,7 +253,7 @@ final class VolumeControlModel: ObservableObject {
             isMuted.toggle()
             statusMessage = isMuted ? "系统已静音" : "已取消静音"
         } catch {
-            statusMessage = error.localizedDescription
+            report(error)
         }
     }
 
@@ -222,7 +265,7 @@ final class VolumeControlModel: ObservableObject {
             try appAudio.setVolume(Float(min(max(volume, 0), 1)), for: target)
             publishApplications()
             statusMessage = "\(app.name) 音量已更新"
-        } catch { statusMessage = error.localizedDescription }
+        } catch { report(error) }
     }
 
     func toggleAppMute(id: String) {
@@ -232,7 +275,7 @@ final class VolumeControlModel: ObservableObject {
             try appAudio.setMuted(!app.isMuted, for: target)
             publishApplications()
             statusMessage = app.isMuted ? "\(app.name) 已取消静音" : "\(app.name) 已静音"
-        } catch { statusMessage = error.localizedDescription }
+        } catch { report(error) }
     }
 
     private func target(for id: String) -> AppAudioTarget? {
@@ -255,10 +298,12 @@ final class VolumeControlModel: ObservableObject {
             try audioRouter.startRouting()
             isV2Enabled = audioRouter.isRouting
             routingError = nil
+            lastError = nil
         } catch {
             guard !Task.isCancelled, request == enableRequestID else { return }
             isV2Enabled = false
             routingError = "启用路由失败：\(error.localizedDescription)"
+            report(error)
         }
         refresh()
     }
@@ -270,6 +315,7 @@ final class VolumeControlModel: ObservableObject {
             routingError = nil
         } catch {
             routingError = "停止路由失败：\(error.localizedDescription)"
+            report(error)
         }
         isV2Enabled = false
         refresh()

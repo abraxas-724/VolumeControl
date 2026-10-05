@@ -8,6 +8,7 @@ final class FakeAudioService: AudioService {
     var deviceName = "测试输出"
     var shouldFail = false
     var shouldFailVolume = false
+    var volumeWrites = 0
 
     func readSystemVolume() throws -> Double {
         if shouldFail || shouldFailVolume { throw AudioServiceError.propertyUnavailable("测试音量") }
@@ -15,6 +16,7 @@ final class FakeAudioService: AudioService {
     }
 
     func writeSystemVolume(_ value: Double) throws {
+        volumeWrites += 1
         if shouldFail { throw AudioServiceError.noDefaultOutputDevice }
         volume = CoreAudioService.clamped(value)
     }

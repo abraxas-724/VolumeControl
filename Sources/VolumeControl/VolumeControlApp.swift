@@ -36,19 +36,20 @@ struct VolumePanel: View {
     @ObservedObject var model: VolumeControlModel
     @AppStorage("showPercentage") private var showPercentage = true
     @State private var showInstallSheet = false
-    @State private var routingTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
             Divider()
+            if let error = model.lastError { errorBanner(error) }
             systemVolume
             Divider()
             appSection
             Divider()
             footer
         }
-        .frame(width: 340)
+        .frame(width: 480)
+        .background(Color(nsColor: .windowBackgroundColor))
         .padding(.vertical, 8)
         .task { await model.refreshLoop() }
         .onReceive(NotificationCenter.default.publisher(for: NSWorkspace.didLaunchApplicationNotification)) { _ in
@@ -57,10 +58,29 @@ struct VolumePanel: View {
         .onReceive(NotificationCenter.default.publisher(for: NSWorkspace.didTerminateApplicationNotification)) { _ in
             model.refresh()
         }
-        .onDisappear { routingTask?.cancel() }
         .sheet(isPresented: $showInstallSheet) {
             BlackHoleInstallView(installGuide: model.blackHoleInstallGuide)
         }
+    }
+
+    private func errorBanner(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Label("操作未完成", systemImage: "exclamationmark.triangle.fill").font(.subheadline.weight(.semibold))
+                Spacer()
+                Button { model.dismissError() } label: { Image(systemName: "xmark") }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("关闭错误提示")
+            }
+            ScrollView {
+                Text(message).font(.callout).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }.frame(height: 68)
+        }
+        .padding(12)
+        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
     }
 
     private var header: some View {
@@ -112,7 +132,6 @@ struct VolumePanel: View {
                 Slider(value: $model.systemVolume, in: 0...1) { editing in
                     if !editing { model.commitSystemVolume() }
                 }
-                .onChange(of: model.systemVolume) { _, _ in model.commitSystemVolume() }
             }
         }
         .padding(16)
@@ -122,15 +141,15 @@ struct VolumePanel: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("应用音量")
-                    .font(.subheadline.weight(.semibold))
+                    .font(.headline)
                 Spacer()
-                Text("\(model.apps.count)")
+                Text("\(model.apps.count) 个应用")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
 
             Text("播放音频后点击应用旁的启用按钮。首次需要允许系统音频录制。")
-                .font(.caption2)
+                .font(.caption)
                 .foregroundStyle(.secondary)
 
             if model.hasAppAudioControl {
@@ -144,21 +163,21 @@ struct VolumePanel: View {
                     .padding(.vertical, 16)
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 2) {
+                    LazyVStack(spacing: 8) {
                         ForEach(model.apps) { app in
                             AppVolumeRow(app: app, model: model)
                         }
                     }
                 }
-                .frame(maxHeight: 260)
+                .frame(height: 320)
+                .scrollIndicators(.visible)
             }
             DisclosureGroup("高级路由测试") {
                 HStack {
                     if model.blackHoleAvailable {
                         if model.isEnablingRouting {
                             Button("取消启动") {
-                                routingTask?.cancel()
-                                model.disableV2()
+                                model.cancelRoutingValidation()
                             }
                             .font(.caption)
                         } else if model.isV2Enabled {
@@ -167,7 +186,7 @@ struct VolumePanel: View {
                                 .buttonStyle(.bordered)
                         } else {
                             Button("验证音频路由") {
-                                routingTask = Task { await model.enableV2() }
+                                model.startRoutingValidation()
                             }
                             .font(.caption)
                             .buttonStyle(.bordered)
@@ -208,65 +227,55 @@ struct VolumePanel: View {
 private struct AppVolumeRow: View {
     let app: AppVolume
     @ObservedObject var model: VolumeControlModel
-    @State private var activationTask: Task<Void, Never>?
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(nsImage: app.icon)
-                .resizable()
-                .frame(width: 24, height: 24)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(app.name)
-                    .lineLimit(1)
-                Text(app.capability.label)
-                    .font(.caption2)
-                    .foregroundStyle(app.capability.isSupported ? Color.secondary : Color.orange)
-            }
-            Spacer(minLength: 4)
-            if app.capability.isSupported {
-                Button {
-                    model.toggleAppMute(id: app.id)
-                } label: {
-                    Image(systemName: app.isMuted ? "speaker.slash.fill" : "speaker.wave.2")
-                        .frame(width: 20, height: 20)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Image(nsImage: app.icon).resizable().frame(width: 28, height: 28)
+                Text(app.name).font(.subheadline.weight(.semibold)).lineLimit(1)
+                Spacer(minLength: 8)
+                if app.capability.isSupported {
+                    Text(app.isMuted ? "已静音" : "\(Int(app.volume * 100))%")
+                        .font(.subheadline.monospacedDigit())
+                    Button { model.disableAppVolume(id: app.id) } label: { Image(systemName: "stop.circle") }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("停止 \(app.name) 应用音量控制")
+                        .help("恢复此应用的原始播放")
+                } else if app.isPreparing {
+                    ProgressView().controlSize(.small)
+                    Button { model.cancelAppVolume(id: app.id) } label: { Image(systemName: "xmark.circle") }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("取消启用 \(app.name) 应用音量")
+                } else if app.canActivate {
+                    Button { model.startAppVolume(id: app.id) } label: { Label("启用", systemImage: "slider.horizontal.3") }
+                        .buttonStyle(.bordered)
+                        .accessibilityLabel("启用 \(app.name) 应用音量")
+                        .help("保持播放音频，启用独立音量")
                 }
-                .buttonStyle(.borderless)
-                .accessibilityLabel(app.isMuted ? "取消应用静音" : "静音应用")
-                .help(app.isMuted ? "取消应用静音" : "静音此应用")
-                
-                Slider(value: Binding(
-                    get: { app.volume },
-                    set: { model.setAppVolume(id: app.id, volume: $0) }
-                ), in: 0...1)
-                .frame(width: 80)
-                Button { model.disableAppVolume(id: app.id) } label: { Image(systemName: "stop.circle") }
+            }
+            if app.capability.isSupported {
+                HStack(spacing: 12) {
+                    Button { model.toggleAppMute(id: app.id) } label: {
+                        Image(systemName: app.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                            .frame(width: 24, height: 24)
+                    }
                     .buttonStyle(.borderless)
-                    .accessibilityLabel("停止 \(app.name) 应用音量控制")
-                    .help("恢复此应用的原始播放")
-                Text("\(Int(app.volume * 100))")
-                    .font(.caption.monospacedDigit())
-                    .frame(width: 28, alignment: .trailing)
-            } else if app.isPreparing {
-                Button { activationTask?.cancel() } label: { Image(systemName: "xmark.circle") }
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel("取消启用应用音量")
-                ProgressView().controlSize(.small)
-            } else if app.canActivate {
-                Button {
-                    activationTask = Task { await model.enableAppVolume(id: app.id) }
-                } label: { Image(systemName: "slider.horizontal.3") }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("启用 \(app.name) 应用音量")
-                .help("保持播放音频，启用独立音量")
+                    .accessibilityLabel(app.isMuted ? "取消应用静音" : "静音应用")
+                    Slider(value: Binding(get: { app.volume }, set: { model.setAppVolume(id: app.id, volume: $0) }), in: 0...1)
+                        .accessibilityLabel("\(app.name) 音量")
+                }
             } else {
-                Image(systemName: "info.circle")
+                Text(app.isPreparing ? "正在验证音频；权限提示出现时可离开面板" : app.capability.label)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-                    .accessibilityLabel(app.capability.label)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                     .help(app.capability.label)
             }
         }
-        .padding(.vertical, 6)
-        .onDisappear { activationTask?.cancel() }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -317,7 +326,7 @@ struct SettingsView: View {
                     .foregroundStyle(.red)
             }
             Toggle("显示音量百分比", isOn: $showPercentage)
-            LabeledContent("版本", value: "2.0.0-beta.1")
+            LabeledContent("版本", value: "2.0.0-beta.2")
         }
         .padding(20)
         .frame(width: 360)

@@ -100,5 +100,36 @@ final class AppAudioModelTests: XCTestCase {
         XCTAssertFalse(model.hasAppAudioControl)
         model.refresh()
         XCTAssertFalse(model.statusMessage.contains("tap busy"))
+        XCTAssertNil(model.lastError)
+    }
+
+    func testModelOwnedActivationCanBeCancelledAndFailureSurvivesRefresh() async throws {
+        let factory = TestProcessFactory()
+        let session = TestProcessSession()
+        let started = expectation(description: "activation started")
+        var continuation: CheckedContinuation<Void, Never>?
+        session.onPrepare = { await withCheckedContinuation { continuation = $0; started.fulfill() } }
+        factory.sessions[player] = session
+        let control = ProcessTapVolumeController(factory: factory, storage: MemoryAppAudioPreferences())
+        let model = VolumeControlModel(audio: FakeAudioService(), applicationProvider: provider(), audioRouter: ModelRoutingStub(), monitorDevices: false, inputPermission: ModelPermissionStub(), appAudio: control)
+        let task = try XCTUnwrap(model.startAppVolume(id: player.id))
+        await fulfillment(of: [started], timeout: 1)
+        XCTAssertTrue(model.apps[0].isPreparing)
+        model.stopAppAudioControl()
+        continuation?.resume()
+        await task.value
+        XCTAssertFalse(model.hasAppAudioControl)
+        XCTAssertFalse(model.apps[0].capability.isSupported)
+        XCTAssertEqual(session.closes, 1)
+        let failed = TestProcessSession()
+        failed.prepareError = AppAudioError.unverifiedSignal
+        factory.sessions[player] = failed
+        await model.enableAppVolume(id: player.id)
+        let error = model.lastError
+        XCTAssertNotNil(error)
+        model.refresh()
+        XCTAssertEqual(model.lastError, error)
+        model.dismissError()
+        XCTAssertNil(model.lastError)
     }
 }

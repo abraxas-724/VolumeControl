@@ -265,3 +265,9 @@ BlackHole 混合流回路已补齐两个引擎的设备绑定、PCM 复制与格
 ## 12. 2026-10-04 应用音量 beta 实现同步
 
 第 5.3 节已落地 Process Tap 捕获、增益、原始播放静音与输出闭环；早期 DriverKit 草案保持研究归档。验证命令为 `swift test` 和显式 `sh scripts/verify-app-audio.sh`，普通单元测试不访问真实音频硬件或用户偏好。里程碑为 `2.0.0-beta.1`，安装/卸载/回滚及已知兼容性见 [README](README.md) 和 [验收记录](docs/PROCESS_TAP_VALIDATION.md)。
+
+## 13. 2026-10-05 beta.2 修复
+
+USB 耳机的麦克风流仍可能出现在聚合设备的回调中，即使使用标志读回为关闭，也不能只靠空指针判断。`ProcessTapInputPlan` 验证物理输入前缀和 tap 通道，C DSP 在启动前固定缓冲范围，完全不读麦克风缓冲。BlackHole 混合流改用 `HALAudioRoutingEngine`，以真实设备为时钟，固定输入与输出范围，默认设备切换不改变回放目的地；采样率/通道不匹配明确拒绝，错误清理保留句柄重试。
+
+启用和路由任务由模型持有，权限提示导致面板隐藏时继续等待；显式取消、停止或退出才取消。面板与错误提示使用明确高度，系统音量刷新不会通过滑块回调反向写入。测试与本机 TencentMeeting / HyperX 验收见 [修复记录](docs/AUDIO_FIX_VALIDATION.md)。

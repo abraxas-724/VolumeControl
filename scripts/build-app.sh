@@ -28,7 +28,7 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
     <key>CFBundleShortVersionString</key>
     <string>2.0.0</string>
     <key>CFBundleVersion</key>
-    <string>20001</string>
+    <string>20002</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSAudioCaptureUsageDescription</key>

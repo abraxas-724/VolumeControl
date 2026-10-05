@@ -1,6 +1,6 @@
 # 第一阶段：BlackHole 音频回路验证
 
-更新日期：2026-10-04。状态：Task 1.1/1.2 代码及模拟验证完成；Task 1.3 真机验收未完成。
+本页保留 2026-10-04 的 AVAudioEngine 回路实现记录。2026-10-05 默认路由已改用固定端点 HAL 聚合设备，在 HyperX / BlackHole 配置下通过切换及恢复验收；性能和完整设备矩阵仍未完成。当前实现见 [beta.2 修复验收](AUDIO_FIX_VALIDATION.md)。
 
 原生应用独立音量已在后续阶段通过 Process Tap 实现并完成两进程真机闭环，详见 [应用音量验收记录](PROCESS_TAP_VALIDATION.md)。本页保留 BlackHole 混合流实验结果，不代表当前应用控制能力。
 
