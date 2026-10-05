@@ -28,13 +28,17 @@ private final class RoutingEngineStub: AudioRoutingEngine {
     var starts: [(AudioDeviceID, AudioDeviceID)] = []
     var stops = 0
     var fails = false
+    var stopError: Error?
     var failures: [(Error) -> Void] = []
     func start(input: AudioDeviceID, output: AudioDeviceID, onFailure: @escaping (Error) -> Void) throws {
         starts.append((input, output))
         failures.append(onFailure)
         if fails { throw AudioRoutingError.engineFailed("测试启动失败") }
     }
-    func stop() { stops += 1 }
+    func stop() throws {
+        stops += 1
+        if let stopError { throw stopError }
+    }
 }
 
 final class AudioDeviceRouterTests: XCTestCase {
@@ -195,5 +199,23 @@ final class AudioDeviceRouterTests: XCTestCase {
         let error = AudioRoutingError.operationFailed("绑定 BlackHole 输入", -50)
         XCTAssertTrue(error.localizedDescription.contains("绑定 BlackHole 输入"))
         XCTAssertTrue(error.localizedDescription.contains("-50"))
+    }
+
+    func testEngineCleanupFailureIsReportedAlongsideRestoreFailureAndRetried() throws {
+        let devices = RoutingDevicesStub()
+        let engine = RoutingEngineStub()
+        let router = AudioDeviceRouter(devices: devices, engine: engine)
+        try router.startRouting()
+        devices.failedWrites = [20]
+        engine.stopError = AudioRoutingError.engineFailed("销毁聚合设备失败")
+        XCTAssertThrowsError(try router.stopRouting()) {
+            XCTAssertTrue($0.localizedDescription.contains("销毁聚合设备失败"))
+            XCTAssertTrue($0.localizedDescription.contains("恢复输出设备失败"))
+        }
+        devices.failedWrites = []
+        engine.stopError = nil
+        try router.stopRouting()
+        XCTAssertEqual(devices.output, 20)
+        XCTAssertEqual(engine.stops, 2)
     }
 }

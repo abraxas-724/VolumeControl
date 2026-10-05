@@ -57,6 +57,23 @@ final class ProcessAudioDSPTests: XCTestCase {
         XCTAssertEqual(VCGainOutputFrames(state), 0)
     }
 
+    func testDisabledMicrophoneBufferDoesNotBlockOrEnterProcessTap() throws {
+        let state = try XCTUnwrap(VCGainCreate(2))
+        defer { VCGainDestroy(state) }
+        let tap = try buffer(interleaved: true, value: 0.3)
+        let output = try buffer(value: 0)
+        let mixed = AudioBufferList.allocate(maximumBuffers: 2)
+        defer { free(mixed.unsafeMutablePointer) }
+        mixed.count = 2
+        mixed[0] = AudioBuffer(mNumberChannels: 1, mDataByteSize: 1024, mData: nil)
+        mixed[1] = UnsafeMutableAudioBufferListPointer(tap.mutableAudioBufferList)[0]
+        VCGainArm(state, true)
+        VCGainRender(state, mixed.unsafePointer, output.mutableAudioBufferList)
+        XCTAssertFalse(VCGainHasInvalidLayout(state))
+        XCTAssertTrue(VCGainHasSignal(state))
+        XCTAssertEqual(output.floatChannelData![0][255], 0.3)
+    }
+
     func testInvalidLayoutFailsClosedAndNonFiniteSamplesAreSanitized() throws {
         let state = try XCTUnwrap(VCGainCreate(2))
         defer { VCGainDestroy(state) }
@@ -68,6 +85,41 @@ final class ProcessAudioDSPTests: XCTestCase {
         let input = try buffer(value: .nan)
         VCGainRender(state, input.audioBufferList, output.mutableAudioBufferList)
         XCTAssertEqual(output.floatChannelData![0][255], 0)
+    }
+
+    func testVerifiedRangesExcludeActiveMicrophoneAndBlackHoleOutput() throws {
+        let state = try XCTUnwrap(VCGainCreate(2))
+        defer { VCGainDestroy(state) }
+        let microphone = try buffer(channels: 1, value: 0.9)
+        let tap = try buffer(interleaved: true, value: 0.3)
+        let physical = try buffer(interleaved: true, value: 0)
+        let virtual = try buffer(interleaved: true, value: 0.7)
+        let input = AudioBufferList.allocate(maximumBuffers: 2)
+        let output = AudioBufferList.allocate(maximumBuffers: 2)
+        defer { free(input.unsafeMutablePointer); free(output.unsafeMutablePointer) }
+        input.count = 2; output.count = 2
+        input[0] = UnsafeMutableAudioBufferListPointer(microphone.mutableAudioBufferList)[0]
+        input[1] = UnsafeMutableAudioBufferListPointer(tap.mutableAudioBufferList)[0]
+        output[0] = UnsafeMutableAudioBufferListPointer(physical.mutableAudioBufferList)[0]
+        output[1] = UnsafeMutableAudioBufferListPointer(virtual.mutableAudioBufferList)[0]
+        XCTAssertTrue(VCGainSetBufferRanges(state, 1, 1, 0, 1))
+        VCGainArm(state, true)
+        VCGainRender(state, input.unsafePointer, output.unsafeMutablePointer)
+        XCTAssertFalse(VCGainHasInvalidLayout(state))
+        XCTAssertEqual(physical.floatChannelData![0][0], 0.3)
+        XCTAssertEqual(virtual.floatChannelData![0][0], 0.7)
+    }
+
+    func testMissingMappedInputClearsOutputAndFailsClosed() throws {
+        let state = try XCTUnwrap(VCGainCreate(2))
+        defer { VCGainDestroy(state) }
+        let input = try buffer(interleaved: true, value: 0.3)
+        let output = try buffer(interleaved: true, value: 0.7)
+        XCTAssertTrue(VCGainSetBufferRanges(state, 1, 1, 0, 1))
+        VCGainArm(state, true)
+        VCGainRender(state, input.audioBufferList, output.mutableAudioBufferList)
+        XCTAssertTrue(VCGainHasInvalidLayout(state))
+        XCTAssertEqual(output.floatChannelData![0][0], 0)
     }
 
     func testGainTransitionIsRampedAndClamped() throws {

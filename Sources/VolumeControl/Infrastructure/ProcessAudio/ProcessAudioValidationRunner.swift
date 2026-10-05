@@ -5,6 +5,36 @@ import Foundation
 /// 显式命令行验收使用两个人造信号进程，不写系统音量、默认设备或用户音量偏好。
 @MainActor
 enum ProcessAudioValidationRunner {
+    static func runTarget(arguments: [String]) async {
+        guard let index = arguments.firstIndex(of: "--verify-target-audio"), arguments.count > index + 3,
+              let pid = pid_t(arguments[index + 1]) else { NSApplication.shared.terminate(nil); return }
+        let target = AppAudioTarget(bundleID: arguments[index + 2], processID: pid)
+        let url = URL(fileURLWithPath: arguments[index + 3])
+        var report: [String: Any] = ["passed": false]
+        if #available(macOS 14.2, *) {
+            let session = CoreAudioProcessSession(target: target)
+            do {
+                let original = try CoreAudioService().defaultOutputDevice()
+                // Unity gain verifies a real app without changing its volume preference.
+                try await session.prepare()
+                try await Task.sleep(nanoseconds: 250_000_000)
+                try session.validate()
+                let levels = try session.levels()
+                report = ["passed": true, "capturedSignalVerified": true, "sourceMuteBehaviorVerified": true, "outputFrames": levels.frames, "sampleRate": session.sampleRate, "channels": session.channelCount, "liveInputDetected": levels.input > 0, "defaultOutputPreserved": try CoreAudioService().defaultOutputDevice() == original]
+                if levels.input > 0 {
+                    let ratio = levels.output / levels.input
+                    guard ratio.isFinite, abs(ratio - 1) < 0.02 else { throw AppAudioError.unavailable("原音量转发验证失败") }
+                    report["gain"] = ratio
+                }
+            } catch { report["passed"] = false; report["error"] = error.localizedDescription }
+            do { try session.close() }
+            catch { report["passed"] = false; report["cleanupError"] = error.localizedDescription }
+        } else { report["error"] = "需要 macOS 14.2+" }
+        do { try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(to: url, options: .atomic) }
+        catch { NSLog("目标应用验收报告写入失败：%@", error.localizedDescription) }
+        NSApplication.shared.terminate(nil)
+    }
+
     static func run(arguments: [String]) async {
         guard let index = arguments.firstIndex(of: "--verify-process-audio"), arguments.count > index + 3,
               let pidA = pid_t(arguments[index + 1]), let pidB = pid_t(arguments[index + 2]) else {

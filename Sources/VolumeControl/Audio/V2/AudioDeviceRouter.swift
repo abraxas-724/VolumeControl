@@ -20,7 +20,7 @@ protocol AudioRoutingDevices {
 
 protocol AudioRoutingEngine {
     func start(input: AudioDeviceID, output: AudioDeviceID, onFailure: @escaping (Error) -> Void) throws
-    func stop()
+    func stop() throws
 }
 
 enum AudioRoutingError: LocalizedError {
@@ -54,7 +54,7 @@ final class AudioDeviceRouter: AudioRouting {
 
     init(
         devices: any AudioRoutingDevices = CoreAudioRoutingDevices(),
-        engine: any AudioRoutingEngine = AVAudioRoutingEngine()
+        engine: any AudioRoutingEngine = HALAudioRoutingEngine()
     ) {
         self.devices = devices
         self.engine = engine
@@ -101,12 +101,19 @@ final class AudioDeviceRouter: AudioRouting {
     func stopRouting() throws {
         generation += 1
         isRouting = false
-        defer { engine.stop() }
-        guard let route else { return }
-        // 用户主动选择了其他输出时保留该选择。
-        if try devices.defaultOutputDevice() == route.input {
-            try devices.setDefaultOutputDevice(route.output)
+        var restoreError: Error?
+        if let route {
+            do {
+                // 用户主动选择了其他输出时保留该选择。
+                if try devices.defaultOutputDevice() == route.input { try devices.setDefaultOutputDevice(route.output) }
+                self.route = nil
+            } catch { restoreError = error }
         }
-        self.route = nil
+        do { try engine.stop() }
+        catch {
+            if let restoreError { throw AudioRoutingError.rollbackFailed(primary: error.localizedDescription, recovery: restoreError.localizedDescription) }
+            throw error
+        }
+        if let restoreError { throw restoreError }
     }
 }

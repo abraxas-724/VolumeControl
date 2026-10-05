@@ -74,17 +74,28 @@ final class CoreAudioProcessSession: ProcessAudioSession {
         try await Task.sleep(nanoseconds: 100_000_000)
         try Task.checkCancellation()
         guard !closed else { throw CancellationError() }
-        guard try ProcessAudioHAL.channelCount(aggregate, scope: kAudioDevicePropertyScopeInput) == tapFormat.mChannelsPerFrame,
-              try ProcessAudioHAL.channelCount(aggregate, scope: kAudioDevicePropertyScopeOutput) == tapFormat.mChannelsPerFrame else {
-            throw AppAudioError.unavailable("聚合设备包含额外输入/输出通道，无法安全映射应用音频")
+        let inputPlan = try ProcessTapInputPlan(
+            physicalInputs: ProcessAudioHAL.bufferChannels(outputDevice, scope: kAudioDevicePropertyScopeInput),
+            aggregateInputs: ProcessAudioHAL.bufferChannels(aggregate, scope: kAudioDevicePropertyScopeInput),
+            tapChannels: tapFormat.mChannelsPerFrame)
+        guard try ProcessAudioHAL.channelCount(aggregate, scope: kAudioDevicePropertyScopeOutput) == tapFormat.mChannelsPerFrame else {
+            throw AppAudioError.unavailable("聚合设备包含额外输出通道，无法安全映射应用音频")
         }
         guard let renderer = VCGainCreate(tapFormat.mChannelsPerFrame) else { throw AppAudioError.unavailable("无法分配应用增益处理器") }
         self.renderer = renderer
+        let inputStart = inputPlan.enabledStreams.prefix(while: { !$0 }).count
+        let inputCount = inputPlan.enabledStreams.count - inputStart
+        let outputCount = try ProcessAudioHAL.bufferChannels(aggregate, scope: kAudioDevicePropertyScopeOutput).count
+        guard VCGainSetBufferRanges(renderer, UInt32(inputStart), UInt32(inputCount), 0, UInt32(outputCount)) else {
+            throw AppAudioError.unavailable("音频缓冲数量超出安全映射范围")
+        }
         VCGainSet(renderer, preferences.gain)
         // HAL owns the block; the C state is released only after the IOProc is destroyed.
         try ProcessAudioHAL.check(AudioDeviceCreateIOProcIDWithBlock(&ioProc, aggregate, nil) { _, input, _, output, _ in
             VCGainRender(renderer, input, output)
         }, "注册应用音频回调")
+        guard let ioProc else { throw AppAudioError.unavailable("未获得应用音频回调句柄") }
+        try ProcessAudioHAL.setInputUsage(aggregate, ioProc: ioProc, enabled: inputPlan.enabledStreams)
         try ProcessAudioHAL.check(AudioDeviceStart(aggregate, ioProc), "启动应用音频捕获")
         started = true
         try await waitFor(renderer, output: false)
@@ -103,7 +114,7 @@ final class CoreAudioProcessSession: ProcessAudioSession {
         for _ in 0..<(output ? 150 : 500) {
             try Task.checkCancellation()
             guard !closed else { throw CancellationError() }
-            if VCGainHasInvalidLayout(renderer) { throw AppAudioError.unavailable("运行时音频缓冲布局不受支持") }
+            if VCGainHasInvalidLayout(renderer) { throw AppAudioError.unavailable("运行时音频缓冲布局不受支持（输入 \(VCGainActiveInputChannels(renderer))、输出 \(VCGainActiveOutputChannels(renderer)) 个有效通道）") }
             if output ? VCGainOutputFrames(renderer) > 0 : VCGainHasSignal(renderer) { return }
             try await Task.sleep(nanoseconds: 20_000_000)
         }

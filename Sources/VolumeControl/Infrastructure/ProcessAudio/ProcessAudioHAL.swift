@@ -38,14 +38,49 @@ struct ProcessAudioHAL {
         return value
     }
     static func channelCount(_ object: AudioObjectID, scope: AudioObjectPropertyScope) throws -> UInt32 {
+        try bufferChannels(object, scope: scope).reduce(0, +)
+    }
+    static func bufferChannels(_ object: AudioObjectID, scope: AudioObjectPropertyScope) throws -> [UInt32] {
         var address = address(kAudioDevicePropertyStreamConfiguration, scope: scope)
         var size: UInt32 = 0
         try check(AudioObjectGetPropertyDataSize(object, &address, 0, nil, &size), "读取应用音频通道配置大小")
-        guard size >= MemoryLayout<AudioBufferList>.size else { return 0 }
+        guard size >= MemoryLayout<AudioBufferList>.size else { return [] }
         let data = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: MemoryLayout<AudioBufferList>.alignment)
         defer { data.deallocate() }
         try check(AudioObjectGetPropertyData(object, &address, 0, nil, &size, data), "读取应用音频通道配置")
-        return UnsafeMutableAudioBufferListPointer(data.assumingMemoryBound(to: AudioBufferList.self)).reduce(0) { $0 + $1.mNumberChannels }
+        return UnsafeMutableAudioBufferListPointer(data.assumingMemoryBound(to: AudioBufferList.self)).map(\.mNumberChannels)
+    }
+
+    /// 关闭物理输入并读回确认；禁止仅靠描述字典中的 channels-in=0 推测麦克风已关闭。
+    static func setInputUsage(_ device: AudioDeviceID, ioProc: AudioDeviceIOProcID, enabled: [Bool]) throws {
+        try setStreamUsage(device, scope: kAudioDevicePropertyScopeInput, ioProc: ioProc, enabled: enabled)
+    }
+    static func setStreamUsage(_ device: AudioDeviceID, scope: AudioObjectPropertyScope, ioProc: AudioDeviceIOProcID, enabled: [Bool]) throws {
+        let offset = MemoryLayout<AudioHardwareIOProcStreamUsage>.offset(of: \.mStreamIsOn)!
+        let size = offset + enabled.count * MemoryLayout<UInt32>.size
+        let data = UnsafeMutableRawPointer.allocate(byteCount: max(size, MemoryLayout<AudioHardwareIOProcStreamUsage>.size), alignment: MemoryLayout<AudioHardwareIOProcStreamUsage>.alignment)
+        defer { data.deallocate() }
+        data.initializeMemory(as: UInt8.self, repeating: 0, count: max(size, MemoryLayout<AudioHardwareIOProcStreamUsage>.size))
+        let usage = data.assumingMemoryBound(to: AudioHardwareIOProcStreamUsage.self)
+        usage.pointee.mIOProc = unsafeBitCast(ioProc, to: UnsafeMutableRawPointer.self)
+        usage.pointee.mNumberStreams = UInt32(enabled.count)
+        let flags = data.advanced(by: offset).assumingMemoryBound(to: UInt32.self)
+        for i in enabled.indices { flags[i] = enabled[i] ? 1 : 0 }
+        var address = address(kAudioDevicePropertyIOProcStreamUsage, scope: scope)
+        try check(AudioObjectSetPropertyData(device, &address, 0, nil, UInt32(size), data), "禁用无关音频输入")
+        var readSize = UInt32(size)
+        try check(AudioObjectGetPropertyData(device, &address, 0, nil, &readSize, data), "验证应用音频输入映射")
+        guard usage.pointee.mNumberStreams == enabled.count,
+              enabled.indices.allSatisfy({ (flags[$0] != 0) == enabled[$0] }) else {
+            throw AppAudioError.unavailable("不能确认麦克风已从应用音量处理中排除")
+        }
+    }
+    static func integer(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector) throws -> UInt32 {
+        var address = address(selector)
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        try check(AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value), "读取音频设备状态")
+        return value
     }
     static func processes(for target: AppAudioTarget) throws -> [AudioObjectID] {
         guard target.processID != getpid(), target.bundleID != Bundle.main.bundleIdentifier else {

@@ -9,6 +9,12 @@ struct VolumeControlApp: App {
         if CommandLine.arguments.contains("--verify-process-audio") {
             Task { await ProcessAudioValidationRunner.run(arguments: CommandLine.arguments) }
         }
+        if CommandLine.arguments.contains("--verify-audio-routing") {
+            Task { await AudioRoutingValidationRunner.run(arguments: CommandLine.arguments) }
+        }
+        if CommandLine.arguments.contains("--verify-target-audio") {
+            Task { await ProcessAudioValidationRunner.runTarget(arguments: CommandLine.arguments) }
+        }
     }
 
     var body: some Scene {
