@@ -23,7 +23,7 @@ final class VolumePanelTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(size.height, 570, "列表不能收缩到仅容纳一个应用")
         audio.volume = 0.7
         model.refresh()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        try await Task.sleep(nanoseconds: 50_000_000)
         XCTAssertEqual(audio.volumeWrites, 0, "刷新系统音量不能触发 UI 反向写入")
         if let path = ProcessInfo.processInfo.environment["VOLUMECONTROL_PANEL_SNAPSHOT"] {
             host.setFrameSize(size)
