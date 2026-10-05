@@ -10,7 +10,23 @@ struct AppAudioTarget: Hashable {
 struct AppAudioPreferences: Codable, Equatable {
     var volume: Float = 1
     var isMuted = false
+    var isEnabled = false
     var gain: Float { isMuted ? 0 : volume }
+
+    init(volume: Float = 1, isMuted: Bool = false, isEnabled: Bool = false) {
+        self.volume = volume
+        self.isMuted = isMuted
+        self.isEnabled = isEnabled
+    }
+
+    private enum CodingKeys: String, CodingKey { case volume, isMuted, isEnabled }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        volume = try values.decode(Float.self, forKey: .volume)
+        isMuted = try values.decode(Bool.self, forKey: .isMuted)
+        // 旧版仅保存音量；不能由旧音量值推断用户同意自动捕获。
+        isEnabled = try values.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? false
+    }
 
     static func validatedVolume(_ value: Float) throws -> Float {
         guard value.isFinite else { throw AppAudioError.invalidVolume }
@@ -57,6 +73,7 @@ protocol AppAudioControlling: AnyObject {
     func setMuted(_ muted: Bool, for target: AppAudioTarget) throws
     func reconcile(_ targets: Set<AppAudioTarget>)
     func stopAll() throws
+    func suspendAll() throws
 }
 
 @MainActor
@@ -76,4 +93,5 @@ protocol ProcessAudioSessionFactory {
 protocol AppAudioPreferenceStoring {
     func load(_ bundleID: String) throws -> AppAudioPreferences
     func save(_ preferences: AppAudioPreferences, for bundleID: String) throws
+    func enabledBundleIDs() throws -> Set<String>
 }

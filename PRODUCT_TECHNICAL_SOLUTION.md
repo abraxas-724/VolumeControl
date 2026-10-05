@@ -20,6 +20,8 @@ VolumeControl 是一个 macOS 状态栏工具。用户无需打开系统设置�
 
 ## 2. 需求分析
 
+2026-10-05 beta.3：`AppAudioPreferences.isEnabled` 按 bundle ID 保存成功启用选择，旧 JSON 缺字段默认 false。`ProcessTapVolumeController.activate` 在捕获和静音行为验证成功后持久化；`suspendAll` 仅清理会话用于退出，`deactivate/stopAll` 清除启用标记但保留音量/静音。模型在面板之外每 2 秒刷新，按 HAL `kAudioProcessPropertyIsRunningOutput` 和可验证进程归属判断播放，仅恢复已记住程序。恢复串行、不重复注册、失败至少间隔 30 秒重试，并与 BlackHole 路由互斥。手动取消/停止会取消排队任务，权限/格式/无信号失败仍为不可调节状态。
+
 ### 2.1 功能需求
 
 | 编号 | 需求 | 验收标准 | 优先级 |

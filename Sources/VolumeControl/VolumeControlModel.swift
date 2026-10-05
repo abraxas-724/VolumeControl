@@ -36,9 +36,10 @@ struct AppVolume: Identifiable, Equatable {
     var isMuted = false
     var canActivate = false
     var isPreparing = false
+    var isRemembered = false
 
     static func == (lhs: AppVolume, rhs: AppVolume) -> Bool {
-        lhs.id == rhs.id && lhs.name == rhs.name && lhs.volume == rhs.volume && lhs.capability == rhs.capability && lhs.isMuted == rhs.isMuted && lhs.canActivate == rhs.canActivate && lhs.isPreparing == rhs.isPreparing
+        lhs.id == rhs.id && lhs.name == rhs.name && lhs.volume == rhs.volume && lhs.capability == rhs.capability && lhs.isMuted == rhs.isMuted && lhs.canActivate == rhs.canActivate && lhs.isPreparing == rhs.isPreparing && lhs.isRemembered == rhs.isRemembered
     }
 }
 
@@ -63,6 +64,11 @@ final class VolumeControlModel: ObservableObject {
     private var preparingApps: Set<String> = []
     private var activationTasks: [String: Task<Void, Never>] = [:]
     private var routingTask: Task<Void, Never>?
+    private var backgroundRefreshTask: Task<Void, Never>?
+    private var restoreRememberedAudio: Bool
+    private let restorationClock: () -> Date
+    private var nextRestoreAttempt: [AppAudioTarget: Date] = [:]
+    private var pausedRestoration: Set<String> = []
     private var audioRouter: any AudioRouting
     private let inputPermission: any AudioInputPermissionProviding
     private var enableRequestID = 0
@@ -76,13 +82,17 @@ final class VolumeControlModel: ObservableObject {
         audioRouter: (any AudioRouting)? = nil,
         monitorDevices: Bool = true,
         inputPermission: any AudioInputPermissionProviding = AudioInputPermission(),
-        appAudio: (any AppAudioControlling)? = nil
+        appAudio: (any AppAudioControlling)? = nil,
+        restoreRememberedAudio: Bool = true,
+        restorationClock: @escaping () -> Date = Date.init
     ) {
         self.audio = audio
         self.applicationProvider = applicationProvider
         self.audioRouter = audioRouter ?? AudioDeviceRouter()
         self.inputPermission = inputPermission
         self.appAudio = appAudio ?? ProcessTapVolumeController()
+        self.restoreRememberedAudio = restoreRememberedAudio
+        self.restorationClock = restorationClock
         systemVolume = 0
         if monitorDevices {
             deviceMonitor = AudioDeviceMonitor { [weak self] in self?.refresh() }
@@ -91,7 +101,7 @@ final class VolumeControlModel: ObservableObject {
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
                     self?.disableV2()
-                    self?.stopAppAudioControl()
+                    self?.suspendAppAudioControl()
                 }
             }
         }
@@ -106,11 +116,21 @@ final class VolumeControlModel: ObservableObject {
         }
         self.appAudio.onChange = { [weak self] in self?.publishApplications() }
         refresh()
+        if monitorDevices && restoreRememberedAudio {
+            // 面板关闭时仍检测已记住应用的播放及重启；休眠期间不持有模型。
+            backgroundRefreshTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    do { try await Task.sleep(nanoseconds: 2_000_000_000) } catch { return }
+                    self?.refresh()
+                }
+            }
+        }
     }
 
     deinit {
         activationTasks.values.forEach { $0.cancel() }
         routingTask?.cancel()
+        backgroundRefreshTask?.cancel()
         if let terminationObserver { NotificationCenter.default.removeObserver(terminationObserver) }
     }
 
@@ -119,6 +139,7 @@ final class VolumeControlModel: ObservableObject {
         discoveredApplications = applicationProvider.applications(excluding: Bundle.main.bundleIdentifier)
         appAudio.reconcile(Set(discoveredApplications.map { AppAudioTarget(bundleID: $0.bundleID, processID: $0.processID) }))
         publishApplications()
+        restoreApplicationsIfNeeded()
         do { blackHoleAvailable = try audioRouter.isBlackHoleAvailable() }
         catch {
             blackHoleAvailable = false
@@ -149,17 +170,41 @@ final class VolumeControlModel: ObservableObject {
             case .notDetected: capability = state.capability.isSupported ? state.capability : .noAudioSession
             case .unavailable(let reason): capability = .unsupported("无法检测音频会话：\(reason)")
             }
+            let displayCapability: AppAudioCapability
+            if state.preferences.isEnabled && state.capability == .unsupported("点击启用应用音量") && !application.isPlayingAudio && (application.audioSessionStatus == .detected || application.audioSessionStatus == .notDetected) {
+                displayCapability = .unsupported("已记住，播放音频后自动恢复")
+            } else { displayCapability = capability }
             return AppVolume(
                 id: target.id, name: application.name, icon: application.icon,
-                volume: Double(state.preferences.volume), capability: capability,
+                volume: Double(state.preferences.volume), capability: displayCapability,
                 isMuted: state.preferences.isMuted,
                 canActivate: application.audioSessionStatus == .detected && appAudio.availability.isSupported && !state.capability.isSupported && !isV2Enabled && !isEnablingRouting,
-                isPreparing: preparingApps.contains(target.id)
+                isPreparing: preparingApps.contains(target.id),
+                isRemembered: state.preferences.isEnabled
             )
         }
     }
 
     var hasAppAudioControl: Bool { appAudio.isActive || !preparingApps.isEmpty }
+
+    private func restoreApplicationsIfNeeded() {
+        guard restoreRememberedAudio, appAudio.availability.isSupported,
+              !isV2Enabled, !isEnablingRouting, activationTasks.isEmpty,
+              preparingApps.isEmpty, apps.filter({ $0.capability.isSupported }).count < 8 else { return }
+        let targets = Set(discoveredApplications.map { AppAudioTarget(bundleID: $0.bundleID, processID: $0.processID) })
+        nextRestoreAttempt = nextRestoreAttempt.filter { targets.contains($0.key) }
+        let now = restorationClock()
+        for application in discoveredApplications where application.isPlayingAudio && !pausedRestoration.contains(application.bundleID) {
+            let target = AppAudioTarget(bundleID: application.bundleID, processID: application.processID)
+            let state = appAudio.state(for: target)
+            guard state.preferences.isEnabled, !state.capability.isSupported,
+                  now >= (nextRestoreAttempt[target] ?? .distantPast) else { continue }
+            // 无信号或设备暂不可用时限速重试，禁止每次刷新创建新 tap。
+            nextRestoreAttempt[target] = now.addingTimeInterval(30)
+            startAppVolume(id: target.id)
+            break
+        }
+    }
 
     // Permission prompts dismiss MenuBarExtra; hiding a view must not cancel an explicit request.
     @discardableResult
@@ -173,7 +218,10 @@ final class VolumeControlModel: ObservableObject {
         return task
     }
 
-    func cancelAppVolume(id: String) { activationTasks[id]?.cancel() }
+    func cancelAppVolume(id: String) {
+        activationTasks[id]?.cancel()
+        disableAppVolume(id: id)
+    }
 
     func startRoutingValidation() {
         guard routingTask == nil else { return }
@@ -194,9 +242,11 @@ final class VolumeControlModel: ObservableObject {
     }
 
     func enableAppVolume(id: String) async {
-        guard let application = discoveredApplications.first(where: { "\($0.bundleID):\($0.processID)" == id }),
+        guard !Task.isCancelled,
+              let application = discoveredApplications.first(where: { "\($0.bundleID):\($0.processID)" == id }),
               !preparingApps.contains(id), !isV2Enabled, !isEnablingRouting else { return }
         let target = AppAudioTarget(bundleID: application.bundleID, processID: application.processID)
+        pausedRestoration.remove(target.bundleID)
         preparingApps.insert(id)
         publishApplications()
         defer { preparingApps.remove(id); publishApplications() }
@@ -211,6 +261,8 @@ final class VolumeControlModel: ObservableObject {
 
     func disableAppVolume(id: String) {
         guard let target = target(for: id) else { return }
+        pausedRestoration.insert(target.bundleID)
+        activationTasks[id]?.cancel()
         do {
             try appAudio.deactivate(target)
             statusMessage = "已恢复该应用的原始播放"
@@ -219,6 +271,7 @@ final class VolumeControlModel: ObservableObject {
     }
 
     func stopAppAudioControl() {
+        pausedRestoration.formUnion(discoveredApplications.map(\.bundleID))
         activationTasks.values.forEach { $0.cancel() }
         do {
             try appAudio.stopAll()
@@ -229,11 +282,12 @@ final class VolumeControlModel: ObservableObject {
         publishApplications()
     }
 
-    func refreshLoop() async {
-        while !Task.isCancelled {
-            refresh()
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-        }
+    func suspendAppAudioControl() {
+        restoreRememberedAudio = false
+        backgroundRefreshTask?.cancel()
+        activationTasks.values.forEach { $0.cancel() }
+        do { try appAudio.suspendAll() } catch { report(error) }
+        publishApplications()
     }
 
     func commitSystemVolume() {

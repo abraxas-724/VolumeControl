@@ -285,4 +285,5 @@ final class UnsupportedAppAudioControl: AppAudioControlling {
     func setMuted(_ muted: Bool, for target: AppAudioTarget) throws { throw AppAudioError.noSession }
     func reconcile(_ targets: Set<AppAudioTarget>) {}
     func stopAll() throws {}
+    func suspendAll() throws {}
 }

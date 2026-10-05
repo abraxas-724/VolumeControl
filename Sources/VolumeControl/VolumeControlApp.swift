@@ -3,7 +3,7 @@ import SwiftUI
 
 @main
 struct VolumeControlApp: App {
-    @StateObject private var model = VolumeControlModel()
+    @StateObject private var model = VolumeControlModel(restoreRememberedAudio: !CommandLine.arguments.contains { $0.hasPrefix("--verify-") })
 
     init() {
         if CommandLine.arguments.contains("--verify-process-audio") {
@@ -14,6 +14,9 @@ struct VolumeControlApp: App {
         }
         if CommandLine.arguments.contains("--verify-target-audio") {
             Task { await ProcessAudioValidationRunner.runTarget(arguments: CommandLine.arguments) }
+        }
+        if CommandLine.arguments.contains("--verify-remembered-audio") {
+            Task { await AppAudioRestorationValidationRunner.run(arguments: CommandLine.arguments) }
         }
     }
 
@@ -51,7 +54,6 @@ struct VolumePanel: View {
         .frame(width: 480)
         .background(Color(nsColor: .windowBackgroundColor))
         .padding(.vertical, 8)
-        .task { await model.refreshLoop() }
         .onReceive(NotificationCenter.default.publisher(for: NSWorkspace.didLaunchApplicationNotification)) { _ in
             model.refresh()
         }
@@ -148,13 +150,14 @@ struct VolumePanel: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text("播放音频后点击应用旁的启用按钮。首次需要允许系统音频录制。")
+            Text("首次播放时点击启用，之后自动恢复音量和静音。需要系统音频录制权限。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            if model.hasAppAudioControl {
+            if model.hasAppAudioControl || model.apps.contains(where: \.isRemembered) {
                 Button("停止应用音量控制") { model.stopAppAudioControl() }
                     .font(.caption)
+                    .help("恢复所有应用的原始播放并关闭自动恢复")
             }
 
             if model.apps.isEmpty {
@@ -240,7 +243,7 @@ private struct AppVolumeRow: View {
                     Button { model.disableAppVolume(id: app.id) } label: { Image(systemName: "stop.circle") }
                         .buttonStyle(.borderless)
                         .accessibilityLabel("停止 \(app.name) 应用音量控制")
-                        .help("恢复此应用的原始播放")
+                        .help("恢复此应用的原始播放并关闭自动恢复")
                 } else if app.isPreparing {
                     ProgressView().controlSize(.small)
                     Button { model.cancelAppVolume(id: app.id) } label: { Image(systemName: "xmark.circle") }
@@ -251,6 +254,12 @@ private struct AppVolumeRow: View {
                         .buttonStyle(.bordered)
                         .accessibilityLabel("启用 \(app.name) 应用音量")
                         .help("保持播放音频，启用独立音量")
+                }
+                if app.isRemembered && !app.capability.isSupported && !app.isPreparing {
+                    Button { model.disableAppVolume(id: app.id) } label: { Image(systemName: "stop.circle") }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("关闭 \(app.name) 自动恢复")
+                        .help("关闭自动恢复，保留音量设置")
                 }
             }
             if app.capability.isSupported {
@@ -326,7 +335,7 @@ struct SettingsView: View {
                     .foregroundStyle(.red)
             }
             Toggle("显示音量百分比", isOn: $showPercentage)
-            LabeledContent("版本", value: "2.0.0-beta.2")
+            LabeledContent("版本", value: "2.0.0-beta.3")
         }
         .padding(20)
         .frame(width: 360)

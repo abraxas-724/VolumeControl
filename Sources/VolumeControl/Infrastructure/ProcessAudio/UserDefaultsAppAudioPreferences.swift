@@ -15,5 +15,14 @@ struct UserDefaultsAppAudioPreferences: AppAudioPreferenceStoring {
         let data = try JSONEncoder().encode(preferences)
         defaults.set(data, forKey: key(bundleID))
     }
+    func enabledBundleIDs() throws -> Set<String> {
+        let prefix = "processTapVolume.v1."
+        var enabled: Set<String> = []
+        for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(prefix) {
+            let bundleID = String(key.dropFirst(prefix.count))
+            if try load(bundleID).isEnabled { enabled.insert(bundleID) }
+        }
+        return enabled
+    }
     private func key(_ bundleID: String) -> String { "processTapVolume.v1.\(bundleID)" }
 }

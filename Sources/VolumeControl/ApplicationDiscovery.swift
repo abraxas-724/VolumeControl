@@ -8,6 +8,7 @@ struct DiscoveredApplication {
     let icon: NSImage
     let processID: pid_t
     let audioSessionStatus: AudioSessionStatus
+    var isPlayingAudio = false
 }
 
 enum AudioSessionStatus: Equatable {
@@ -34,12 +35,16 @@ struct WorkspaceApplicationProvider: ApplicationProvider {
             .compactMap { application in
                 guard let bundleID = application.bundleIdentifier, seenBundles.insert(bundleID).inserted else { return nil }
                 let audioSessionStatus: AudioSessionStatus
+                var isPlayingAudio = false
                 switch processResult {
                 case .success(let processes):
                     let target = AppAudioTarget(bundleID: bundleID, processID: application.processIdentifier)
                     audioSessionStatus = processes.contains {
                         AudioProcessFamily.matches(processID: $0.processID, bundleID: $0.bundleID, target: target, parent: AudioProcessFamily.parentProcessID)
                     } ? .detected : .notDetected
+                    isPlayingAudio = processes.contains {
+                        $0.isRunningOutput && AudioProcessFamily.matches(processID: $0.processID, bundleID: $0.bundleID, target: target, parent: AudioProcessFamily.parentProcessID)
+                    }
                 case .failure(let error):
                     audioSessionStatus = .unavailable(error.localizedDescription)
                 }
@@ -48,7 +53,8 @@ struct WorkspaceApplicationProvider: ApplicationProvider {
                     name: application.localizedName ?? bundleID,
                     icon: application.icon ?? NSImage(systemSymbolName: "app", accessibilityDescription: nil)!,
                     processID: application.processIdentifier,
-                    audioSessionStatus: audioSessionStatus
+                    audioSessionStatus: audioSessionStatus,
+                    isPlayingAudio: isPlayingAudio
                 )
             }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
@@ -59,6 +65,7 @@ struct AudioProcess {
     let objectID: AudioObjectID
     let processID: pid_t
     let bundleID: String?
+    var isRunningOutput = false
 }
 
 struct AudioProcessDetector {
@@ -110,6 +117,7 @@ struct AudioProcessDetector {
             throw AudioServiceError.operationFailed(operation: "读取进程音频会话 Bundle ID", status: bundleStatus)
         }
         let bundle = bundleID?.takeRetainedValue() as String?
-        return AudioProcess(objectID: objectID, processID: processID, bundleID: bundle)
+        let running = try ProcessAudioHAL.integer(objectID, kAudioProcessPropertyIsRunningOutput) != 0
+        return AudioProcess(objectID: objectID, processID: processID, bundleID: bundle, isRunningOutput: running)
     }
 }

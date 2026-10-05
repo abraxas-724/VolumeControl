@@ -34,6 +34,7 @@ final class TestProcessFactory: ProcessAudioSessionFactory {
 final class MemoryAppAudioPreferences: AppAudioPreferenceStoring {
     var values: [String: AppAudioPreferences] = [:]
     var saveError: Error?
+    func enabledBundleIDs() throws -> Set<String> { Set(values.filter { $0.value.isEnabled }.keys) }
     func load(_ bundleID: String) throws -> AppAudioPreferences { values[bundleID] ?? AppAudioPreferences() }
     func save(_ preferences: AppAudioPreferences, for bundleID: String) throws {
         if let saveError { throw saveError }
@@ -45,6 +46,19 @@ final class MemoryAppAudioPreferences: AppAudioPreferenceStoring {
 final class ProcessTapVolumeControllerTests: XCTestCase {
     let player = AppAudioTarget(bundleID: "test.player", processID: 100)
     let browser = AppAudioTarget(bundleID: "test.browser", processID: 200)
+
+    func testVerifiedActivationIsRememberedAndExplicitStopForgetsIt() async throws {
+        let storage = MemoryAppAudioPreferences()
+        let control = ProcessTapVolumeController(factory: TestProcessFactory(), storage: storage)
+        try await control.activate(player)
+        let saved = try XCTUnwrap(storage.values[player.bundleID])
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(saved)) as? [String: Any])
+        XCTAssertEqual(json["isEnabled"] as? Bool, true, "成功启用必须保存自动恢复意图")
+        try control.deactivate(player)
+        let stopped = try XCTUnwrap(storage.values[player.bundleID])
+        let stoppedJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(stopped)) as? [String: Any])
+        XCTAssertEqual(stoppedJSON["isEnabled"] as? Bool, false)
+    }
 
     func testIndependentVolumeAndMutePreserveTheOtherApplication() async throws {
         let factory = TestProcessFactory()
@@ -112,7 +126,32 @@ final class ProcessTapVolumeControllerTests: XCTestCase {
         XCTAssertThrowsError(try control.setVolume(0.2, for: player))
         XCTAssertEqual(factory.sessions[player]?.applied.last?.volume, 1)
         XCTAssertEqual(control.state(for: player).preferences.volume, 1)
+        XCTAssertThrowsError(try control.stopAll(), "停止也需要写入关闭自动恢复；失败必须可见")
+        XCTAssertFalse(control.isActive, "设置写入失败仍须停止音频会话")
+        storage.saveError = nil
         try control.stopAll()
+    }
+
+    func testFailedPersistenceDuringActivationClosesSessionWithoutRemembering() async {
+        let storage = MemoryAppAudioPreferences()
+        storage.saveError = AppAudioError.unavailable("disk full")
+        let factory = TestProcessFactory()
+        let control = ProcessTapVolumeController(factory: factory, storage: storage)
+        do { try await control.activate(player); XCTFail("must fail") } catch {}
+        XCTAssertFalse(control.state(for: player).capability.isSupported)
+        XCTAssertEqual(factory.sessions[player]?.closes, 1)
+        XCTAssertNil(storage.values[player.bundleID])
+    }
+
+    func testStoppingAllAlsoForgetsClosedApplications() async throws {
+        let storage = MemoryAppAudioPreferences()
+        storage.values[browser.bundleID] = AppAudioPreferences(volume: 0.6, isEnabled: true)
+        let control = ProcessTapVolumeController(factory: TestProcessFactory(), storage: storage)
+        try await control.activate(player)
+        try control.stopAll()
+        XCTAssertFalse(try storage.load(player.bundleID).isEnabled)
+        XCTAssertFalse(try storage.load(browser.bundleID).isEnabled)
+        XCTAssertEqual(try storage.load(browser.bundleID).volume, 0.6)
     }
 
     func testClampingAndNonFiniteValues() async throws {

@@ -74,6 +74,10 @@ final class ProcessTapVolumeController: AppAudioControlling {
             try Task.checkCancellation()
             guard let entry = entries[target], ObjectIdentifier(entry.session) == ObjectIdentifier(session) else { throw CancellationError() }
             try session.validate()
+            var remembered = preferences
+            remembered.isEnabled = true
+            try storage.save(remembered, for: target.bundleID)
+            entries[target]?.preferences = remembered
             entries[target]?.ready = true
             onChange?()
         } catch {
@@ -97,10 +101,17 @@ final class ProcessTapVolumeController: AppAudioControlling {
     }
 
     func deactivate(_ target: AppAudioTarget) throws {
+        // 保存失败仍须释放音频会话，避免把停止操作变成继续播放。
+        let persistence = Result {
+            var preferences = try readPreferences(target.bundleID)
+            preferences.isEnabled = false
+            try storage.save(preferences, for: target.bundleID)
+        }
         discard(target, reason: nil)
         failures[target] = nil
         defer { onChange?() }
         try retryCleanup()
+        try persistence.get()
     }
 
     func setVolume(_ value: Float, for target: AppAudioTarget) throws {
@@ -150,6 +161,23 @@ final class ProcessTapVolumeController: AppAudioControlling {
     }
 
     func stopAll() throws {
+        defer { onChange?() }
+        var errors: [String] = []
+        do { try suspendAll() } catch { errors.append(error.localizedDescription) }
+        do {
+            for bundleID in try storage.enabledBundleIDs() {
+                do {
+                    var preferences = try readPreferences(bundleID)
+                    preferences.isEnabled = false
+                    try storage.save(preferences, for: bundleID)
+                } catch { errors.append(error.localizedDescription) }
+            }
+        } catch { errors.append(error.localizedDescription) }
+        if !errors.isEmpty { throw AppAudioError.unavailable(errors.joined(separator: "；")) }
+    }
+
+    /// 退出只释放会话；用户选择的自动恢复与音量设置继续保留。
+    func suspendAll() throws {
         monitorTask?.cancel()
         monitorTask = nil
         for target in Array(entries.keys) { discard(target, reason: nil) }
@@ -205,7 +233,7 @@ final class ProcessTapVolumeController: AppAudioControlling {
     deinit {
         monitorTask?.cancel()
         MainActor.assumeIsolated {
-            do { try stopAll() }
+            do { try suspendAll() }
             catch { Logger(subsystem: "com.volumecontrol.app", category: "process-audio").error("\(error.localizedDescription, privacy: .public)") }
         }
     }
