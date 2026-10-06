@@ -79,6 +79,7 @@ final class VolumeControlModel: ObservableObject {
     private var enableRequestID = 0
     private var routingError: String?
     private var terminationObserver: NSObjectProtocol?
+    private var applicationObservers: [NSObjectProtocol] = []
     let blackHoleInstallGuide = VirtualDeviceManager().getInstallationGuide()
 
     init(
@@ -101,6 +102,14 @@ final class VolumeControlModel: ObservableObject {
         systemVolume = 0
         if monitorDevices {
             deviceMonitor = AudioDeviceMonitor { [weak self] in self?.refresh() }
+            // 应用发现与面板生命周期解耦，面板关闭后也及时处理启动和退出。
+            for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
+                applicationObservers.append(NSWorkspace.shared.notificationCenter.addObserver(
+                    forName: name, object: nil, queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.refresh() }
+                })
+            }
             terminationObserver = NotificationCenter.default.addObserver(
                 forName: NSApplication.willTerminateNotification, object: nil, queue: .main
             ) { [weak self] _ in
@@ -137,6 +146,7 @@ final class VolumeControlModel: ObservableObject {
         routingTask?.cancel()
         backgroundRefreshTask?.cancel()
         if let terminationObserver { NotificationCenter.default.removeObserver(terminationObserver) }
+        for observer in applicationObservers { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
     }
 
     func refresh() {

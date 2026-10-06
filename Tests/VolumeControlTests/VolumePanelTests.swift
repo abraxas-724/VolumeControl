@@ -26,12 +26,23 @@ final class VolumePanelTests: XCTestCase {
         try await Task.sleep(nanoseconds: 50_000_000)
         XCTAssertEqual(audio.volumeWrites, 0, "刷新系统音量不能触发 UI 反向写入")
         if let path = ProcessInfo.processInfo.environment["VOLUMECONTROL_PANEL_SNAPSHOT"] {
-            host.setFrameSize(size)
-            host.layoutSubtreeIfNeeded()
-            let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-            host.cacheDisplay(in: host.bounds, to: bitmap)
-            let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
-            try png.write(to: URL(fileURLWithPath: path))
+            func capture(_ destination: String, scheme: ColorScheme) throws {
+                let preview = NSHostingView(rootView: VolumePanel(model: model).environment(\.colorScheme, scheme))
+                preview.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+                window.contentView = preview
+                preview.setFrameSize(preview.fittingSize)
+                preview.layoutSubtreeIfNeeded()
+                let bitmap = try XCTUnwrap(preview.bitmapImageRepForCachingDisplay(in: preview.bounds))
+                preview.cacheDisplay(in: preview.bounds, to: bitmap)
+                let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                try png.write(to: URL(fileURLWithPath: destination))
+            }
+            let base = URL(fileURLWithPath: path).deletingPathExtension().path
+            try capture(path, scheme: .light)
+            try capture(base + "-dark.png", scheme: .dark)
+            audio.selectionError = AudioServiceError.operationFailed(operation: "切换默认输出设备", status: -50)
+            model.selectOutputDevice(2)
+            try capture(base + "-error.png", scheme: .light)
         }
         window.contentView = nil
         model.stopAppAudioControl()
