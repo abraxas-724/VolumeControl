@@ -3,6 +3,8 @@ import SwiftUI
 struct AppVolumeRow: View {
     let app: AppVolume
     @ObservedObject var model: VolumeControlModel
+    @Environment(\.interfaceOptions) private var options
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var stateLabel: String {
         if app.isPreparing { return "验证中" }
@@ -13,11 +15,11 @@ struct AppVolumeRow: View {
 
     private var stateColor: Color {
         if app.isPreparing || app.isRemembered && !app.capability.isSupported { return .orange }
-        return app.capability.isSupported ? PanelStyle.accent : .secondary
+        return app.capability.isSupported ? options.accent.color : .secondary
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: options.density == .compact ? 6 : 10) {
             HStack(spacing: 10) {
                 Image(nsImage: app.icon).resizable().scaledToFit().frame(width: 32, height: 32)
                     .accessibilityHidden(true)
@@ -34,17 +36,21 @@ struct AppVolumeRow: View {
             if app.capability.isSupported {
                 HStack(spacing: 10) {
                     Button { model.toggleAppMute(id: app.id) } label: {
-                        Image(systemName: app.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                        VolumeSymbol(muted: app.isMuted)
                     }
                     .buttonStyle(PanelIconButtonStyle())
-                    .foregroundStyle(app.isMuted ? PanelStyle.accent : Color.secondary)
+                    .foregroundStyle(app.isMuted ? options.accent.color : Color.secondary)
                     .accessibilityLabel(app.isMuted ? "取消 \(app.name) 静音" : "静音 \(app.name)")
                     .help(app.isMuted ? "取消静音" : "静音")
                     Slider(value: Binding(get: { app.volume }, set: { model.setAppVolume(id: app.id, volume: $0) }), in: 0...1)
                         .accessibilityLabel("\(app.name) 音量")
+                    if options.showPercentage {
                     Text("\(Int(app.volume * 100))%")
                         .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                         .frame(width: 36, alignment: .trailing)
+                        .contentTransition(.numericText())
+                        .animation(options.animation(reduceMotion: reduceMotion), value: Int(app.volume * 100))
+                    }
                 }
             } else {
                 Text(app.isPreparing ? "正在验证音频；权限提示出现时可离开面板" : app.capability.label)

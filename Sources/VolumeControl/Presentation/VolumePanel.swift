@@ -2,8 +2,13 @@ import SwiftUI
 
 struct VolumePanel: View {
     @ObservedObject var model: VolumeControlModel
+    @ObservedObject var preferences: InterfacePreferences
     let openSettings: () -> Void
-    @AppStorage("showPercentage") private var showPercentage = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var filterNamespace
+    @State private var appeared = false
+    private var options: InterfaceOptions { preferences.options }
+    private var accent: Color { options.accent.color }
     @State private var showInstallSheet = false
     @State private var searchText = ""
     @State private var filter: AppListFilter = .all
@@ -13,20 +18,33 @@ struct VolumePanel: View {
     }
 
     var body: some View {
+        GlassControlGroup { panelContent }
+            .modifier(InterfaceAppearance(options: options))
+    }
+
+    private var panelContent: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
             if let error = model.lastError { errorBanner(error) }
             systemVolume
             appSection
-            advancedSection
+            if options.showAdvanced || model.isV2Enabled || model.isEnablingRouting { advancedSection }
             footer
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 10)
         .frame(width: 480)
         .fixedSize(horizontal: false, vertical: true)
-        .background(Color(nsColor: .windowBackgroundColor))
-        .tint(PanelStyle.accent)
+        .background(InterfaceBackdrop())
+        .opacity(appeared ? 1 : 0)
+        .offset(y: appeared || !options.allowsMotion(reduceMotion: reduceMotion) ? 0 : 5)
+        .animation(options.animation(reduceMotion: reduceMotion), value: filter)
+        .onAppear {
+            filter = options.defaultToEnabledApps ? .enabled : .all
+            withAnimation(options.animation(reduceMotion: reduceMotion)) { appeared = true }
+        }
+        .onDisappear { appeared = false }
+        .onChange(of: options.defaultToEnabledApps) { _, enabled in filter = enabled ? .enabled : .all }
         .sheet(isPresented: $showInstallSheet) {
             BlackHoleInstallView(installGuide: model.blackHoleInstallGuide)
         }
@@ -36,16 +54,16 @@ struct VolumePanel: View {
         HStack(spacing: 10) {
             Image(systemName: "slider.horizontal.3")
                 .font(.system(size: 19, weight: .semibold))
-                .foregroundStyle(PanelStyle.accent)
+                .foregroundStyle(accent)
                 .frame(width: 40, height: 40)
-                .background(PanelStyle.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+                .modifier(InteractiveSurface(emphasized: true))
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 8) {
                     Text("VolumeControl").font(.system(size: 17, weight: .semibold))
                     Text("BETA").font(.system(size: 9, weight: .bold, design: .rounded))
-                        .foregroundStyle(PanelStyle.accent)
+                        .foregroundStyle(accent)
                         .padding(.horizontal, 6).padding(.vertical, 3)
-                        .background(PanelStyle.accent.opacity(0.1), in: Capsule())
+                        .background(accent.opacity(0.1), in: Capsule())
                 }
                 Text("让每个应用，都有合适的音量")
                     .font(.caption).foregroundStyle(.secondary)
@@ -63,18 +81,20 @@ struct VolumePanel: View {
             HStack(alignment: .firstTextBaseline) {
                 Text("系统音量").font(.subheadline.weight(.semibold))
                 Spacer()
-                if showPercentage && model.canAdjustSystemVolume {
+                if options.showPercentage && model.canAdjustSystemVolume {
                     Text(model.isMuted ? "已静音" : "\(Int(model.systemVolume * 100))%")
                         .font(.system(size: 22, weight: .semibold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(model.isMuted ? Color.secondary : PanelStyle.accent)
+                        .contentTransition(.numericText())
+                        .animation(options.animation(reduceMotion: reduceMotion), value: Int(model.systemVolume * 100))
+                        .foregroundStyle(model.isMuted ? Color.secondary : accent)
                 }
             }
             HStack(spacing: 12) {
                 Button { model.toggleMute() } label: {
-                    Image(systemName: model.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                    VolumeSymbol(muted: model.isMuted)
                 }
                 .buttonStyle(PanelIconButtonStyle())
-                .foregroundStyle(model.isMuted ? PanelStyle.accent : Color.primary)
+                .foregroundStyle(model.isMuted ? accent : Color.primary)
                 .disabled(!model.canMuteSystemAudio)
                 .accessibilityLabel(model.isMuted ? "取消静音" : "静音")
                 .help(model.isMuted ? "取消静音" : "静音")
@@ -135,11 +155,23 @@ struct VolumePanel: View {
                 }
                 .padding(8)
                 .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
-                Picker("应用筛选", selection: $filter) {
-                    ForEach(AppListFilter.allCases) { item in Text(item.label).tag(item) }
-                }
-                .pickerStyle(.segmented).labelsHidden().frame(width: 164)
-                .accessibilityLabel("应用筛选")
+                HStack(spacing: 2) {
+                    ForEach(AppListFilter.allCases) { item in
+                        Button { filter = item } label: {
+                            Text(item.label).font(.caption.weight(.medium))
+                                .frame(maxWidth: .infinity).padding(.vertical, 8)
+                                .background {
+                                    if filter == item {
+                                        RoundedRectangle(cornerRadius: 10).fill(accent.opacity(0.16))
+                                            .matchedGeometryEffect(id: "filter", in: filterNamespace)
+                                    }
+                                }
+                        }.buttonStyle(.plain)
+                            .accessibilityLabel(item.label)
+                            .accessibilityAddTraits(filter == item ? .isSelected : [])
+                    }
+                }.padding(3).frame(width: 164)
+                    .modifier(InteractiveSurface())
             }
             Group {
                 if model.apps.isEmpty {
@@ -155,11 +187,13 @@ struct VolumePanel: View {
                     .scrollIndicators(.visible)
                 }
             }
-            .frame(height: 320)
+            .frame(height: options.density.listHeight)
+            if options.showTips {
             Label("播放音频后启用，验证成功才可调节。设置会自动记住。", systemImage: "info.circle")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .help("首次启用需要系统音频录制权限；音频仅在本机处理。")
+            }
         }
     }
 
