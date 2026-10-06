@@ -283,3 +283,7 @@ BlackHole 混合流回路已补齐两个引擎的设备绑定、PCM 复制与格
 USB 耳机的麦克风流仍可能出现在聚合设备的回调中，即使使用标志读回为关闭，也不能只靠空指针判断。`ProcessTapInputPlan` 验证物理输入前缀和 tap 通道，C DSP 在启动前固定缓冲范围，完全不读麦克风缓冲。BlackHole 混合流改用 `HALAudioRoutingEngine`，以真实设备为时钟，固定输入与输出范围，默认设备切换不改变回放目的地；采样率/通道不匹配明确拒绝，错误清理保留句柄重试。
 
 启用和路由任务由模型持有，权限提示导致面板隐藏时继续等待；显式取消、停止或退出才取消。面板与错误提示使用明确高度，系统音量刷新不会通过滑块回调反向写入。测试与本机 TencentMeeting / HyperX 验收见 [修复记录](docs/AUDIO_FIX_VALIDATION.md)。
+
+## 2.0.0 发布同步（2026-10-06）
+
+当前功能作为 GitHub 非预发布 Release 交付，通用 DMG/ZIP 含完整应用包和 ad-hoc 签名。构建脚本校验包版本与发行版本一致；设置从 Info.plist 读取版本。Developer ID、公证及新机器安装验收尚未完成，不将 GitHub 正式 Release 等同于 P5 完成。验证、安装及限制见 [发布说明](docs/RELEASE_2.0.0.md)。

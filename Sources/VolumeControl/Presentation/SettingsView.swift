@@ -50,7 +50,7 @@ struct SettingsView: View {
                 }.padding(.bottom, 4)
             }.scrollIndicators(.visible)
             HStack {
-                Text("2.0.0-beta.3").font(.caption).foregroundStyle(.secondary)
+                Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0.0").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("重置界面设置") { preferences.resetAppearance() }
                     .buttonStyle(.borderless).font(.caption)
