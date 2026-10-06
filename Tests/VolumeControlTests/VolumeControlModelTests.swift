@@ -187,7 +187,8 @@ final class VolumeControlModelTests: XCTestCase {
             name: "Player",
             icon: NSImage(size: NSSize(width: 16, height: 16)),
             processID: 101,
-            audioSessionStatus: .detected
+            audioSessionStatus: .detected,
+            isPlayingAudio: true
         )
         let model = makeModel(
             audio: FakeAudioService(),
@@ -205,7 +206,7 @@ final class VolumeControlModelTests: XCTestCase {
         let application = DiscoveredApplication(
             bundleID: "com.example.player", name: "Player",
             icon: NSImage(size: NSSize(width: 16, height: 16)),
-            processID: 101, audioSessionStatus: .detected
+            processID: 101, audioSessionStatus: .detected, isPlayingAudio: true
         )
         let model = VolumeControlModel(
             audio: FakeAudioService(), applicationProvider: FakeApplicationProvider(values: [application]),
@@ -302,10 +303,15 @@ final class VolumeControlModelTests: XCTestCase {
             processID: 101,
             audioSessionStatus: .unavailable("Core Audio 查询失败")
         )
+        let provider = AudioListApplications()
+        provider.values = [DiscoveredApplication(bundleID: application.bundleID, name: application.name,
+            icon: application.icon, processID: application.processID, audioSessionStatus: .detected, isPlayingAudio: true)]
         let model = makeModel(
             audio: FakeAudioService(),
-            applicationProvider: FakeApplicationProvider(values: [application])
+            applicationProvider: provider
         )
+        provider.values = [application]
+        model.refresh()
 
         XCTAssertEqual(model.apps[0].capability, .unsupported("无法检测音频会话：Core Audio 查询失败"))
     }

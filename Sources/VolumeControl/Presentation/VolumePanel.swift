@@ -170,7 +170,7 @@ struct VolumePanel: View {
             }
             Group {
                 if model.apps.isEmpty {
-                    emptyState("暂无运行中的应用", detail: "打开应用并播放音频，再点击刷新。", symbol: "app.dashed")
+                    emptyState("暂无音频应用", detail: "播放音频后应用会自动显示，也可点击刷新。", symbol: "speaker.wave.2")
                 } else if visibleApps.isEmpty {
                     emptyState("没有符合条件的应用", detail: "尝试其他名称，或切换到全部应用。", symbol: "magnifyingglass")
                 } else {
@@ -184,7 +184,7 @@ struct VolumePanel: View {
             }
             .frame(height: options.density.listHeight)
             if options.showTips {
-            Label("播放音频后启用，验证成功才可调节。设置会自动记住。", systemImage: "info.circle")
+            Label("仅显示音频应用；播放后启用，验证成功才可调节。", systemImage: "info.circle")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .help("首次启用需要系统音频录制权限；音频仅在本机处理。")

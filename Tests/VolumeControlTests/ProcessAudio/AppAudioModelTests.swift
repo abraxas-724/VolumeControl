@@ -6,7 +6,7 @@ import XCTest
 final class AppAudioModelTests: XCTestCase {
     private let player = AppAudioTarget(bundleID: "test.player", processID: 100)
     private func provider() -> FakeApplicationProvider {
-        FakeApplicationProvider(values: [DiscoveredApplication(bundleID: player.bundleID, name: "Player", icon: NSImage(size: NSSize(width: 16, height: 16)), processID: player.processID, audioSessionStatus: .detected)])
+        FakeApplicationProvider(values: [DiscoveredApplication(bundleID: player.bundleID, name: "Player", icon: NSImage(size: NSSize(width: 16, height: 16)), processID: player.processID, audioSessionStatus: .detected, isPlayingAudio: true)])
     }
     func testUIOnlyEnablesAfterVerifiedSessionAndRetainsSettingsOnRefresh() async {
         let audio = FakeAudioService()

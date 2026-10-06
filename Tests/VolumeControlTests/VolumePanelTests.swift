@@ -9,7 +9,7 @@ final class VolumePanelTests: XCTestCase {
         let audio = FakeAudioService()
         let names = ["腾讯会议", "Google Chrome", "Music", "Safari", "Visual Studio Code", "Slack"]
         let applications = names.enumerated().map { index, name in
-            DiscoveredApplication(bundleID: "test.\(index)", name: name, icon: NSImage(systemSymbolName: "app.fill", accessibilityDescription: nil)!, processID: Int32(100 + index), audioSessionStatus: .detected)
+            DiscoveredApplication(bundleID: "test.\(index)", name: name, icon: NSImage(systemSymbolName: "app.fill", accessibilityDescription: nil)!, processID: Int32(100 + index), audioSessionStatus: .detected, isPlayingAudio: true)
         }
         let control = ProcessTapVolumeController(factory: TestProcessFactory(), storage: MemoryAppAudioPreferences())
         let model = VolumeControlModel(audio: audio, applicationProvider: FakeApplicationProvider(values: applications), audioRouter: ModelRoutingStub(), monitorDevices: false, inputPermission: ModelPermissionStub(), appAudio: control)

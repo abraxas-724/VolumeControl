@@ -66,6 +66,7 @@ final class VolumeControlModel: ObservableObject {
     
     private let appAudio: any AppAudioControlling
     private var discoveredApplications: [DiscoveredApplication] = []
+    private var observedAudioOutputs: Set<AppAudioTarget> = []
     private var preparingApps: Set<String> = []
     private var activationTasks: [String: Task<Void, Never>] = [:]
     private var routingTask: Task<Void, Never>?
@@ -152,7 +153,13 @@ final class VolumeControlModel: ObservableObject {
     func refresh() {
         let audioError = refreshSystemAudio()
         discoveredApplications = applicationProvider.applications(excluding: Bundle.main.bundleIdentifier)
-        appAudio.reconcile(Set(discoveredApplications.map { AppAudioTarget(bundleID: $0.bundleID, processID: $0.processID) }))
+        let targets = Set(discoveredApplications.map { AppAudioTarget(bundleID: $0.bundleID, processID: $0.processID) })
+        // 暂停不让列表跳动；退出或更换 PID 后重新等待输出证据，不能由输入会话推断输出能力。
+        observedAudioOutputs.formIntersection(targets)
+        observedAudioOutputs.formUnion(discoveredApplications.filter(\.isPlayingAudio).map {
+            AppAudioTarget(bundleID: $0.bundleID, processID: $0.processID)
+        })
+        appAudio.reconcile(targets)
         publishApplications()
         restoreApplicationsIfNeeded()
         do { blackHoleAvailable = try audioRouter.isBlackHoleAvailable() }
@@ -169,16 +176,23 @@ final class VolumeControlModel: ObservableObject {
         } else if apps.contains(where: { $0.capability.isSupported }) {
             statusMessage = "已启用 \(apps.filter { $0.capability.isSupported }.count) 个应用的独立音量"
         } else if apps.isEmpty {
-            statusMessage = "打开应用后点击刷新"
+            let detectionError = discoveredApplications.compactMap { application -> String? in
+                if case .unavailable(let reason) = application.audioSessionStatus { return reason }
+                return nil
+            }.first
+            statusMessage = detectionError.map { "无法检测应用音频输出：\($0)" } ?? "播放音频后应用会自动显示"
         } else {
-            statusMessage = "已发现 \(apps.count) 个运行中的应用"
+            statusMessage = "已发现 \(apps.count) 个音频应用"
         }
     }
 
     private func publishApplications() {
-        apps = discoveredApplications.map { application in
+        apps = discoveredApplications.compactMap { application in
             let target = AppAudioTarget(bundleID: application.bundleID, processID: application.processID)
             let state = appAudio.state(for: target)
+            // 已启用或待验证的应用必须能继续被找到、停止；保留行不代表音量已经可调节。
+            guard observedAudioOutputs.contains(target) || state.preferences.isEnabled ||
+                  state.capability.isSupported || preparingApps.contains(target.id) else { return nil }
             let capability: AppAudioCapability
             switch application.audioSessionStatus {
             case .detected: capability = state.capability
