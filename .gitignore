@@ -7,3 +7,4 @@ DerivedData/
 .DS_Store
 VolumeControl.app/
 *.dSYM/
+dist/

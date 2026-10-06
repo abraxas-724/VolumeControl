@@ -24,6 +24,9 @@ protocol AudioService {
     func readMuted() throws -> Bool
     func writeMuted(_ muted: Bool) throws
     func outputDeviceName() throws -> String
+    func outputDevices() throws -> [OutputAudioDevice]
+    func defaultOutputDevice() throws -> AudioDeviceID
+    func selectOutputDevice(_ device: AudioDeviceID) throws
 }
 
 struct CoreAudioService: AudioService {
@@ -65,7 +68,7 @@ struct CoreAudioService: AudioService {
         guard status == noErr, let name else {
             throw AudioServiceError.operationFailed(operation: "读取输出设备名称", status: status)
         }
-        return name.takeUnretainedValue() as String
+        return name.takeRetainedValue() as String
     }
 
     func defaultOutputDevice() throws -> AudioDeviceID {
@@ -82,6 +85,67 @@ struct CoreAudioService: AudioService {
             throw AudioServiceError.operationFailed(operation: "读取默认输出设备", status: status)
         }
         return device
+    }
+
+    func outputDevices() throws -> [OutputAudioDevice] {
+        var address = systemProperty(kAudioHardwarePropertyDevices)
+        var size: UInt32 = 0
+        try check(AudioObjectGetPropertyDataSize(systemObject, &address, 0, nil, &size), "读取输出设备列表大小")
+        var devices = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
+        guard !devices.isEmpty else { return [] }
+        try check(AudioObjectGetPropertyData(systemObject, &address, 0, nil, &size, &devices), "读取输出设备列表")
+        return try devices.prefix(Int(size) / MemoryLayout<AudioDeviceID>.size).compactMap { device in
+            guard try isAvailableOutput(device) else { return nil }
+            var nameAddress = systemProperty(kAudioObjectPropertyName)
+            var name: Unmanaged<CFString>?
+            var nameSize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+            try check(AudioObjectGetPropertyData(device, &nameAddress, 0, nil, &nameSize, &name), "读取输出设备名称")
+            guard let name else { throw AudioServiceError.propertyUnavailable("输出设备名称") }
+            return OutputDeviceMetadata().device(device, name: name.takeRetainedValue() as String)
+        }.sorted { $0.name == $1.name ? $0.id < $1.id : $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    func selectOutputDevice(_ device: AudioDeviceID) throws {
+        // 点击菜单和写入之间设备可能断开，必须重新确认它仍可输出。
+        guard try outputDevices().contains(where: { $0.id == device }) else {
+            throw AudioServiceError.propertyUnavailable("所选输出设备已断开或不可用")
+        }
+        var address = systemProperty(kAudioHardwarePropertyDefaultOutputDevice)
+        var settable = DarwinBoolean(false)
+        try check(AudioObjectIsPropertySettable(systemObject, &address, &settable), "检查输出设备切换权限")
+        guard settable.boolValue else { throw AudioServiceError.propertyUnavailable("默认输出设备不可切换") }
+        var value = device
+        try check(AudioObjectSetPropertyData(systemObject, &address, 0, nil, UInt32(MemoryLayout<AudioDeviceID>.size), &value), "切换默认输出设备")
+        guard try defaultOutputDevice() == device else {
+            throw AudioServiceError.propertyUnavailable("默认输出设备切换未生效，请重试")
+        }
+    }
+
+    private func isAvailableOutput(_ device: AudioDeviceID) throws -> Bool {
+        var aliveAddress = systemProperty(kAudioDevicePropertyDeviceIsAlive)
+        var alive: UInt32 = 0
+        var aliveSize = UInt32(MemoryLayout<UInt32>.size)
+        try check(AudioObjectGetPropertyData(device, &aliveAddress, 0, nil, &aliveSize, &alive), "读取输出设备在线状态")
+        guard alive != 0 else { return false }
+        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreamConfiguration,
+                                                 mScope: kAudioDevicePropertyScopeOutput,
+                                                 mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        try check(AudioObjectGetPropertyDataSize(device, &address, 0, nil, &size), "读取输出通道配置大小")
+        guard size >= MemoryLayout<AudioBufferList>.size else { return false }
+        // HAL 返回变长缓冲列表，不能只分配一个固定大小的 AudioBufferList。
+        let data = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: MemoryLayout<AudioBufferList>.alignment)
+        defer { data.deallocate() }
+        try check(AudioObjectGetPropertyData(device, &address, 0, nil, &size, data), "读取输出通道配置")
+        return UnsafeMutableAudioBufferListPointer(data.assumingMemoryBound(to: AudioBufferList.self)).contains { $0.mNumberChannels > 0 }
+    }
+
+    private func systemProperty(_ selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+    }
+
+    private func check(_ status: OSStatus, _ operation: String) throws {
+        guard status == noErr else { throw AudioServiceError.operationFailed(operation: operation, status: status) }
     }
 
     static func clamped(_ value: Double) -> Double {

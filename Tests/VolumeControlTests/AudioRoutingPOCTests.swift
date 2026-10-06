@@ -2,6 +2,12 @@ import XCTest
 @testable import VolumeControl
 
 final class AudioRoutingPOCTests: XCTestCase {
+    override func setUpWithError() throws {
+        guard ProcessInfo.processInfo.environment["VOLUMECONTROL_HARDWARE_TESTS"] == "1" else {
+            throw XCTSkip("真机音频测试须显式设置 VOLUMECONTROL_HARDWARE_TESTS=1")
+        }
+    }
+
     
     /// 测试虚拟设备检测
     func testDetectVirtualDevice() {

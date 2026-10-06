@@ -1,326 +1,104 @@
 # VolumeControl
 
-<div align="center">
+macOS SwiftUI 状态栏音量工具。当前发布版本：**2.0.0**。
 
-![VolumeControl](https://img.shields.io/badge/platform-macOS%2014%2B-blue)
-![Swift](https://img.shields.io/badge/swift-5.9-orange)
-![License](https://img.shields.io/badge/license-MIT-green)
-![Version](https://img.shields.io/badge/version-1.0.0-red)
+从 [GitHub Release](https://github.com/abraxas-724/VolumeControl/releases/tag/v2.0.0) 下载 DMG 或 ZIP（Apple Silicon / Intel 通用包）。本次发布为 ad-hoc 签名，尚无 Developer ID 签名或苹果公证；首次打开可能被 Gatekeeper 阻止，请在“系统设置 → 隐私与安全性”确认来源后允许打开。应用音量仍按运行时验证结果启用，兼容性限制见下文。
 
-优雅的 macOS 菜单栏音量控制工具
+## 功能
 
-[功能特性](#功能特性) • [安装](#安装) • [使用](#使用) • [开发](#开发) • [贡献](#贡献)
+- 原生卡片式面板，支持系统浅色/深色、应用名称搜索和“全部应用 / 已启用”筛选；已记住但等待恢复的应用仍可在筛选中停止。
+- 系统主音量、静音、输出设备选择和应用发现（macOS 14+）。在面板“输出设备”菜单切换内建扬声器、USB/蓝牙耳机、HDMI 等系统可用输出，勾选显示当前设备，热插拔和系统外部切换会同步。
+- 应用混音器只列出检测到音频输出的应用，以及已启用/记住的音频应用。未检测到输出的普通应用和仅有输入会话的应用隐藏；首次播放后自动出现，暂停时保留，退出后移除。不按应用名称建立白名单，显示也不代表独立音量已经通过验证。
+- 耳机新接入时自动切换输出，可在“设置 → 通用”关闭或指定 USB/蓝牙耳机；启动与常规刷新不抢回手动选择。切换先清理旧音频会话，验证后恢复应用音量，详见 [耳机自动切换](docs/HEADPHONE_AUTO_SWITCH.md)。
+- **应用独立音量与静音**（macOS 14.2+）：使用公开 Core Audio Process Tap 捕获目标应用，应用增益后输出到真实设备。
+- 各应用分别启用、调节、静音或停止；启用选择、音量和静音按 bundle ID 保存，重启 VolumeControl 或目标应用后自动恢复。
+- 逐应用验证捕获信号、输出回调和原始播放静音状态，验证成功后才提供滑块。失败显示具体原因。
 
-</div>
+应用独立音量不需要 BlackHole、DriverKit 或安装额外驱动，不切换系统默认输出，不修改系统主音量。BlackHole 混合流测试保留在“高级路由测试”中，与应用独立音量互斥。
 
----
+## 构建和使用
 
-## 概述
+需要 Swift 5.9+、支持当前 Core Audio SDK 的 Xcode。
 
-VolumeControl 是一款轻量级的 macOS 菜单栏应用，为系统音量控制提供直观、快速的访问方式。采用原生 SwiftUI 构建，提供流畅的用户体验和现代化的界面设计。
-
-### 为什么选择 VolumeControl？
-
-- 🚀 **轻量快速** - 原生 Swift 实现，内存占用低，启动迅速
-- 🎨 **优雅设计** - 遵循 macOS 设计规范，与系统完美融合
-- 🔒 **隐私安全** - 仅使用公开系统 API，不收集任何用户数据
-- 🎯 **功能实用** - 快速调整音量、切换静音、查看音频应用
-- 🛠 **开源免费** - MIT 许可证，完全开源，欢迎贡献
-
----
-
-## 功能特性
-
-### 核心功能
-
-- ✅ **系统音量控制**
-  - 实时显示当前音量百分比
-  - 拖动滑块调整音量（0-100%）
-  - 精确的音量显示和控制
-
-- 🔇 **静音开关**
-  - 一键切换系统静音
-  - 清晰的静音状态指示
-
-- 🔊 **音频设备管理**
-  - 显示当前默认输出设备
-  - 自动检测设备切换
-  - 支持热插拔设备
-
-- 🎵 **音频应用监控**
-  - 实时显示正在播放音频的应用
-  - 显示应用图标和名称
-  - 快速识别音频来源
-
-- ⚙️ **系统集成**
-  - 登录时自动启动
-  - 菜单栏图标常驻
-  - 最小化系统占用
-
-### 技术特性
-
-- 原生 SwiftUI 界面
-- Core Audio 音频控制
-- 实时设备监听
-- NSWorkspace 应用发现
-- 符合 macOS 14+ 标准
-
----
-
-## 系统要求
-
-- macOS 14.0 (Sonoma) 或更高版本
-- Apple Silicon (M1/M2/M3) 或 Intel 处理器
-- 约 20-30 MB 磁盘空间
-
----
-
-## 安装
-
-### 方式 1: 下载预编译版本（推荐）
-
-1. 前往 [Releases](https://github.com/yourusername/VolumeControl/releases) 页面
-2. 下载最新版本的 `VolumeControl.dmg`
-3. 打开 DMG 文件，将 VolumeControl 拖入 Applications 文件夹
-4. 首次运行时，右键点击选择「打开」
-
-### 方式 2: 从源码编译
-
-```bash
-# 克隆仓库
-git clone https://github.com/yourusername/VolumeControl.git
+```sh
+git clone https://github.com/abraxas-724/VolumeControl.git
 cd VolumeControl
-
-# 使用 Xcode 打开
-open Package.swift
-
-# 或使用命令行构建
-swift build -c release
-
-# 运行
-.build/release/VolumeControl
-```
-
----
-
-## 使用
-
-### 首次启动
-
-1. 启动 VolumeControl
-2. 在菜单栏中找到音量图标
-3. 点击图标查看音量控制面板
-
-### 基本操作
-
-**调整音量**
-- 点击菜单栏图标
-- 拖动音量滑块或点击滑块轨道
-
-**切换静音**
-- 点击「静音」按钮
-- 或使用键盘快捷键
-
-**查看音频应用**
-- 在音量面板底部查看「正在播放」列表
-- 显示所有当前播放音频的应用
-
-**设置**
-- 点击底部齿轮图标
-- 配置登录启动等选项
-
-### 卸载
-
-1. 退出 VolumeControl
-2. 将应用从 Applications 文件夹移至废纸篓
-3. （可选）删除偏好设置：
-   ```bash
-   rm ~/Library/Preferences/com.volumecontrol.app.plist
-   ```
-
----
-
-## 开发
-
-### 项目结构
-
-```
-VolumeControl/
-├── Sources/VolumeControl/
-│   ├── VolumeControlApp.swift        # 应用入口
-│   ├── VolumeControlModel.swift      # 主视图模型
-│   ├── AudioService.swift            # 音频服务
-│   ├── AudioDeviceMonitor.swift      # 设备监听
-│   ├── ApplicationDiscovery.swift    # 应用发现
-│   └── LoginItemController.swift     # 登录项管理
-├── Tests/VolumeControlTests/         # 单元测试
-├── Package.swift                     # Swift Package 配置
-├── README.md                         # 本文件
-└── LICENSE                           # MIT 许可证
-```
-
-### 架构设计
-
-采用经典的分层架构：
-
-- **Presentation Layer** (VolumeControlApp, VolumeControlModel)
-  - SwiftUI 视图和用户交互
-  
-- **Application Layer** (AudioService, ApplicationDiscovery)
-  - 业务逻辑和应用服务
-  
-- **Domain Layer**
-  - 音频域模型和规则
-  
-- **Infrastructure Layer** (AudioDeviceMonitor)
-  - 系统 API 封装和监听
-
-### 构建
-
-```bash
-# 调试构建
-swift build
-
-# 发布构建
-swift build -c release
-
-# 运行测试
 swift test
-
-# 生成 Xcode 项目
-swift package generate-xcodeproj
+sh scripts/build-app.sh
+open VolumeControl.app
 ```
 
-### 测试
+1. 启动打包的应用，在状态栏面板“输出设备”菜单选择所需设备。
+2. 让目标应用播放音频，打开状态栏面板，点击该应用旁的“启用”按钮。
+3. 首次使用时，macOS 可能提示允许**系统音频录制**。音频仅在本机实时处理，不保存录音文件或上传；这与麦克风权限不同。
+4. 验证成功后，用滑块调节音量，点击扬声器图标静音/取消静音。
+5. 点击该行停止图标恢复原始播放并关闭该应用自动恢复；面板底部的停止图标关闭所有已记住应用的自动恢复。正常退出清理捕获会话，保留选择。
 
-```bash
-# 运行所有测试
-swift test
+首次验证成功后，应用会记住启用选择。后台每 2 秒检查已记住应用的真实音频输出活动；尚未播放时显示“已记住，播放音频后自动恢复”，验证成功后才开放滑块。重启、设备/采样率/音频进程变化后自动重新验证，失败显示原因并至少间隔 30 秒重试。面板关闭不影响恢复。首次从旧版升级需启用一次：旧版只有音量/静音值，不推断为自动捕获授权。未启用过的程序不会自动捕获，BlackHole 路由测试期间暂停恢复。
 
-# 运行特定测试
-swift test --filter VolumeControlModelTests
+切换输出时先释放旧设备的应用音量会话，保留已启用选择、音量与静音，再在新设备重新验证并恢复。新设备不支持应用音量时会显示原因。输出设备选择本身不要求 Process Tap 支持；不支持硬件音量/静音的设备会禁用对应控件。高级 BlackHole 路由测试运行或等待权限时，请先停止测试再切换。此菜单修改系统默认媒体输出；已在其他应用内固定输出的音频和系统提示音可能不跟随。
 
-# 查看测试覆盖率
-swift test --enable-code-coverage
+## 已验证与限制
+
+2026-10-05 在 HyperX Cloud III USB 耳机上通过两个人造音频进程的真机验收：48kHz、双声道；增益分别为 0.25 和约 0.80；独立静音、取消静音、原始静音状态读回、重复启停、清理和默认输出保持通过。腾讯会议当前配置的真实捕获与原音量转发也通过；BlackHole → HyperX 的固定路由通过默认输出切换及恢复验收。此验收测量 HAL 回调内的 PCM，不代表扬声器声压或端到端延迟测量。
+
+- 当前最多同时控制 8 个应用。
+- 支持真实默认输出设备的单输出流、1–2 通道、原生 Float32 PCM；USB 耳机附带的麦克风输入会按 HAL 使用标志禁用，并以明确的缓冲范围排除；无法确认的映射、多输出流、虚拟设备或其他格式会被明确拒绝。
+- 多进程应用只合并精确 bundle ID 或能确认的父子进程。无法归属的辅助进程不会被误控制；辅助进程改变时释放旧会话，再自动验证恢复。
+- 应用必须在启用验证时播放非静音音频。录制权限不足、暂停、受保护音频或应用输出到其他设备可能导致无法验证。
+- macOS 14.0/14.1 保留系统音量功能，不提供应用独立音量。
+- 除已测的腾讯会议当前配置外，浏览器、其他会议软件、独占设备应用、蓝牙切换、睡眠唤醒和长时间运行仍需扩大真机验收；尚未宣称覆盖所有应用。
+- 本地脚本使用 ad-hoc 签名；Developer ID、公证和新机器安装验收尚未完成。
+
+修复细节与界面验证见 [beta.2 验收记录](docs/AUDIO_FIX_VALIDATION.md)。面板宽 480 像素，应用列表固定高 320 像素，能够同时显示多行应用；错误提示独立显示，不因定时刷新消失。系统滑块仅在用户操作结束时写入，读取刷新不再反向改动系统音量。
+
+详见 [应用音量验收记录](docs/PROCESS_TAP_VALIDATION.md) 和 [当前计划](TASK_PLAN.md)。
+
+自动恢复的行为、升级说明及验证范围见 [beta.3 自动恢复记录](docs/APP_AUDIO_RESTORATION.md)。
+
+## 测试
+
+`swift test` 使用协议替身、内存设置和内存 PCM，不修改真实系统音量、默认设备或用户偏好。旧硬件 PoC 默认跳过。
+
+真实两进程验收需要单独运行：
+
+```sh
+sh scripts/verify-app-audio.sh
 ```
 
----
+该脚本创建两个人造低音量信号进程，以实际 Process Tap 和 HAL 输出回调验证独立增益及静音；不写音量偏好或改变默认输出。首次运行可能需要用户批准系统音频录制。报告和日志仅保存在被 Git 忽略的 `.build/` 下。按 Ctrl-C 可结束并清理测试进程。
 
-## 技术栈
+混合流路由的显式真机验收：
 
-- **语言**: Swift 5.9+
-- **框架**: SwiftUI, AppKit
-- **音频**: Core Audio, AVFoundation
-- **构建**: Swift Package Manager
-- **测试**: XCTest
-- **最低系统**: macOS 14.0
+```sh
+sh scripts/verify-audio-routing.sh
+```
 
----
+此测试会临时把默认输出切到 BlackHole，回放固定到启动前的真实设备，结束时恢复默认输出。使用相同采样率、相同 1–2 通道 Float32 的单输入/输出流；不再使用会跟随默认设备切换的 AVAudioEngine 回路。测试时应停止应用独立音量控制。
 
-## 路线图
+## 安装、卸载和回滚
 
-### v1.0.0 (当前版本)
-- ✅ 系统音量控制
-- ✅ 静音开关
-- ✅ 音频应用监控
-- ✅ 登录启动
+- 安装：构建应用后可将其放入“应用程序”。应用音量功能无需系统扩展、驱动安装或管理员权限；首次使用按系统提示授予系统音频录制权限。
+- 更新/移动：先退出旧实例，再替换或移动 `.app` 并从最终路径重新打开。自动恢复选择保留；本地 ad-hoc 更新若触发系统权限提示，按系统提示重新授权。
+- 卸载：先停止应用音量控制，退出并删除应用；可在系统设置中撤销其音频录制权限。
+- 回滚：停止控制后即可使用原始应用输出或旧版本。若出现清理错误，继续点击停止重试并退出应用；若正在使用独立的 BlackHole 路由测试，则还需确认默认输出恢复到真实设备。
 
-### v1.1.0 (计划中)
-- [ ] 键盘快捷键支持
-- [ ] 音量预设保存
-- [ ] 通知中心集成
-- [ ] 多语言支持（中文、英文）
+## 项目结构
 
-### v2.0.0 (未来)
-- [ ] 应用级音量控制（需要 Core Audio HAL）
-- [ ] 音频均衡器
-- [ ] 输出设备快速切换
-- [ ] 音频效果插件
+- `Sources/VolumeControl/Domain/`：应用目标、音量设置、能力和错误。
+- `Sources/VolumeControl/Application/`：应用级会话生命周期与写入协调。
+- `Sources/VolumeControl/Infrastructure/ProcessAudio/`：Process Tap、HAL、设置存储和显式真机验收入口。
+- `Sources/VolumeControlDSP/`：使用原子状态的实时 PCM 增益处理，无回调内分配或锁。
+- `Sources/VolumeControl/`：SwiftUI、应用发现、系统音量和实验性 BlackHole 路由。
+- `Tests/VolumeControlTests/`：业务、竞态、DSP 和界面模型测试。
+- `scripts/`：构建与真机验收脚本。
 
----
+[GitHub](https://github.com/abraxas-724/VolumeControl) · [MIT License](LICENSE)
 
-## 常见问题
+## UI 与功能方向
 
-**Q: 为什么应用需要麦克风权限？**
+2026-10-06 完成第一版 UI 美化与搜索/筛选。参考 FineTune、BackgroundMusic、MonitorControl 和 eqMac，项目对比、源码入口、功能优先级与验证范围见 [UI 调研与实现记录](docs/UI_RESEARCH.md)。
 
-A: VolumeControl 不需要麦克风权限。如果系统提示，可能是 Core Audio 监听导致。你可以拒绝该权限，不影响功能。
+设置入口和面板留白已修复：齿轮按钮显式打开并置前设置窗口，关闭后可再次打开；面板按内容高度布局。验证及限制见 [设置与布局修复](docs/SETTINGS_PANEL_FIX.md)。
 
-**Q: 支持应用级音量控制吗？**
-
-A: 当前版本（v1.0）仅支持系统音量控制。应用级音量控制需要更底层的音频路由技术，已列入 v2.0 路线图。
-
-**Q: 为什么无法控制某些应用的音量？**
-
-A: macOS 的公开 API 不支持直接控制应用音量。系统音量会影响所有应用的音频输出。
-
-**Q: 应用会自动更新吗？**
-
-A: 当前版本需要手动更新。计划在未来版本中添加自动更新功能。
-
-**Q: 应用是否收集数据？**
-
-A: 否。VolumeControl 完全在本地运行，不收集任何用户数据，不联网。
-
----
-
-## 贡献
-
-欢迎贡献！无论是报告 bug、提出功能建议，还是提交代码，都非常感谢。
-
-### 贡献指南
-
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启 Pull Request
-
-### 代码规范
-
-- 遵循 Swift API Design Guidelines
-- 使用有意义的变量和函数名
-- 添加必要的代码注释
-- 确保所有测试通过
-- 保持代码风格一致
-
-### 报告问题
-
-在 [Issues](https://github.com/yourusername/VolumeControl/issues) 页面提交问题时，请包含：
-
-- macOS 版本
-- VolumeControl 版本
-- 问题描述
-- 复现步骤
-- 期望行为
-- 截图（如果适用）
-
----
-
-## 许可证
-
-本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件
-
----
-
-## 致谢
-
-- [Background Music](https://github.com/kyleneideck/BackgroundMusic) - 应用级音量控制研究参考
-- [BlackHole](https://github.com/ExistentialAudio/BlackHole) - 虚拟音频设备
-- Swift 社区的所有贡献者
-
----
-
-## 联系方式
-
-- 项目主页: [https://github.com/yourusername/VolumeControl](https://github.com/yourusername/VolumeControl)
-- 问题反馈: [Issues](https://github.com/yourusername/VolumeControl/issues)
-
----
-
-<div align="center">
-
-**如果这个项目对你有帮助，请给个 ⭐️ Star！**
-
-Made with ❤️ for macOS
-
-</div>
+设置现分为“外观与动效”和“通用”：支持跟随系统/浅色/深色、六种强调色、经典/磨砂/液态玻璃背景及控件、原生面板展开动效、紧凑布局及默认应用筛选等。液态模式默认使用苹果原生清透玻璃，可调背景透明度（默认 88%，只调整底层磨砂），也可选择更重视对比度的系统自适应玻璃；颜色模式另可选择跟随系统。修改即时生效，原生液态玻璃要求 macOS 26+，较早系统使用磨砂回退。功能、兼容性与验证见 [外观设置](docs/APPEARANCE_SETTINGS.md)。

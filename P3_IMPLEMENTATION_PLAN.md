@@ -1,5 +1,8 @@
 # P3 应用级音量控制实施计划
 
+> 2026-10-04：本文为早期研究/规划，不能把 BlackHole 混合流按 PID 分离视为可行或已完成，也不能据缺少直接增益属性排除 Process Tap 路径。原生 Process Tap 应用音量 beta 已实现并通过两进程真机验收；本文旧虚拟设备路线保留为归档，当前执行状态以 [TASK_PLAN.md](TASK_PLAN.md) 和 [验证记录](docs/PROCESS_TAP_VALIDATION.md) 为准。
+
+
 ## 目标
 
 在 VolumeControl 中集成虚拟音频设备，实现所有应用的独立音量控制。

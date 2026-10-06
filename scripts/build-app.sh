@@ -2,10 +2,12 @@
 set -eu
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-BUILD_DIR="$ROOT_DIR/.build/release"
+
 APP_DIR="$ROOT_DIR/VolumeControl.app"
 
-swift build -c release --package-path "$ROOT_DIR"
+# 发布包同时包含 Apple Silicon 和 Intel；两种架构使用相同源码和版本。
+swift build -c release --arch arm64 --arch x86_64 --package-path "$ROOT_DIR"
+BUILD_DIR="$(swift build -c release --arch arm64 --arch x86_64 --package-path "$ROOT_DIR" --show-bin-path)"
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "$BUILD_DIR/VolumeControl" "$APP_DIR/Contents/MacOS/VolumeControl"
@@ -26,11 +28,15 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>2.0.0</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>20004</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>捕获您启用的应用音频，应用独立音量和静音后播放到当前输出设备。音频不会录制为文件或上传。</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>音频路由验证需要读取 BlackHole 虚拟音频输入并转发到您选择的输出设备。</string>
     <key>LSUIElement</key>
     <true/>
 </dict>

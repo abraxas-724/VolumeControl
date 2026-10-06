@@ -1,5 +1,7 @@
 import AppKit
+import CoreAudio
 import Foundation
+import OSLog
 
 enum AppAudioCapability: Equatable {
     case supported
@@ -32,9 +34,13 @@ struct AppVolume: Identifiable, Equatable {
     let icon: NSImage
     var volume: Double
     var capability: AppAudioCapability
+    var isMuted = false
+    var canActivate = false
+    var isPreparing = false
+    var isRemembered = false
 
     static func == (lhs: AppVolume, rhs: AppVolume) -> Bool {
-        lhs.id == rhs.id && lhs.name == rhs.name && lhs.volume == rhs.volume && lhs.capability == rhs.capability
+        lhs.id == rhs.id && lhs.name == rhs.name && lhs.volume == rhs.volume && lhs.capability == rhs.capability && lhs.isMuted == rhs.isMuted && lhs.canActivate == rhs.canActivate && lhs.isPreparing == rhs.isPreparing && lhs.isRemembered == rhs.isRemembered
     }
 }
 
@@ -43,61 +49,314 @@ final class VolumeControlModel: ObservableObject {
     @Published var systemVolume: Double
     @Published private(set) var isMuted = false
     @Published private(set) var apps: [AppVolume] = []
+    @Published private(set) var outputDevices: [OutputAudioDevice] = []
+    @Published private(set) var selectedOutputDeviceID: AudioDeviceID?
+    @Published private(set) var canAdjustSystemVolume = false
+    @Published private(set) var canMuteSystemAudio = false
     @Published private(set) var outputDeviceName = "默认输出设备"
     @Published private(set) var statusMessage = "正在探测音频状态"
+    @Published private(set) var isV2Enabled = false
+    @Published private(set) var blackHoleAvailable = false
+    @Published private(set) var isEnablingRouting = false
+    @Published private(set) var lastError: String?
+    @Published var deviceSwitchOptions: DeviceSwitchOptions {
+        didSet { if deviceSwitchOptions != oldValue { deviceSwitchStorage.save(deviceSwitchOptions) } }
+    }
 
     private let audio: any AudioService
     private let applicationProvider: any ApplicationProvider
+    private let deviceSwitchStorage: any DeviceSwitchPreferenceStoring
+    private var headphoneAutoSwitch = HeadphoneAutoSwitchPolicy()
+    private var outputDeviceSnapshotIsValid = false
     private var deviceMonitor: AudioDeviceMonitor?
+    
+    private let appAudio: any AppAudioControlling
+    private var discoveredApplications: [DiscoveredApplication] = []
+    private var observedAudioOutputs: Set<AppAudioTarget> = []
+    private var preparingApps: Set<String> = []
+    private var activationTasks: [String: Task<Void, Never>] = [:]
+    private var routingTask: Task<Void, Never>?
+    private var backgroundRefreshTask: Task<Void, Never>?
+    private var restoreRememberedAudio: Bool
+    private let restorationClock: () -> Date
+    private var nextRestoreAttempt: [AppAudioTarget: Date] = [:]
+    private var pausedRestoration: Set<String> = []
+    private var audioRouter: any AudioRouting
+    private let inputPermission: any AudioInputPermissionProviding
+    private var enableRequestID = 0
+    private var routingError: String?
+    private var terminationObserver: NSObjectProtocol?
+    private var applicationObservers: [NSObjectProtocol] = []
+    let blackHoleInstallGuide = VirtualDeviceManager().getInstallationGuide()
 
     init(
         audio: any AudioService = CoreAudioService(),
-        applicationProvider: any ApplicationProvider = WorkspaceApplicationProvider()
+        applicationProvider: any ApplicationProvider = WorkspaceApplicationProvider(),
+        audioRouter: (any AudioRouting)? = nil,
+        monitorDevices: Bool = true,
+        inputPermission: any AudioInputPermissionProviding = AudioInputPermission(),
+        appAudio: (any AppAudioControlling)? = nil,
+        restoreRememberedAudio: Bool = true,
+        deviceSwitchStorage: (any DeviceSwitchPreferenceStoring)? = nil,
+        restorationClock: @escaping () -> Date = Date.init
     ) {
         self.audio = audio
         self.applicationProvider = applicationProvider
+        let switchStorage = deviceSwitchStorage ?? UserDefaultsDeviceSwitchPreferences()
+        self.deviceSwitchStorage = switchStorage
+        deviceSwitchOptions = switchStorage.load()
+        self.audioRouter = audioRouter ?? AudioDeviceRouter()
+        self.inputPermission = inputPermission
+        self.appAudio = appAudio ?? ProcessTapVolumeController()
+        self.restoreRememberedAudio = restoreRememberedAudio
+        self.restorationClock = restorationClock
         systemVolume = 0
-        deviceMonitor = nil
-        deviceMonitor = AudioDeviceMonitor { [weak self] in
-            self?.refresh()
+        if monitorDevices {
+            deviceMonitor = AudioDeviceMonitor { [weak self] in self?.refresh() }
+            // 应用发现与面板生命周期解耦，面板关闭后也及时处理启动和退出。
+            for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
+                applicationObservers.append(NSWorkspace.shared.notificationCenter.addObserver(
+                    forName: name, object: nil, queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.refresh() }
+                })
+            }
+            terminationObserver = NotificationCenter.default.addObserver(
+                forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.disableV2()
+                    self?.suspendAppAudioControl()
+                }
+            }
         }
+        self.audioRouter.onFailure = { [weak self] error in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.isV2Enabled = false
+                self.routingError = error.localizedDescription
+                self.report(error)
+                self.refresh()
+            }
+        }
+        self.appAudio.onChange = { [weak self] in self?.publishApplications() }
         refresh()
+        if monitorDevices && restoreRememberedAudio {
+            // 面板关闭时仍检测已记住应用的播放及重启；休眠期间不持有模型。
+            backgroundRefreshTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    do { try await Task.sleep(nanoseconds: 2_000_000_000) } catch { return }
+                    self?.refresh()
+                }
+            }
+        }
+    }
+
+    deinit {
+        activationTasks.values.forEach { $0.cancel() }
+        routingTask?.cancel()
+        backgroundRefreshTask?.cancel()
+        if let terminationObserver { NotificationCenter.default.removeObserver(terminationObserver) }
+        for observer in applicationObservers { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
     }
 
     func refresh() {
         let audioError = refreshSystemAudio()
-        let discovered = applicationProvider.applications(excluding: Bundle.main.bundleIdentifier)
-        apps = discovered.map { application in
-            let capability: AppAudioCapability
-            switch application.audioSessionStatus {
-            case .detected:
-                capability = .unsupported("系统接口不支持应用增益")
-            case .notDetected:
-                capability = .noAudioSession
-            case .unavailable(let reason):
-                capability = .unsupported("无法检测音频会话：\(reason)")
-            }
-            return AppVolume(
-                id: "\(application.bundleID):\(application.processID)",
-                name: application.name,
-                icon: application.icon,
-                volume: 1,
-                capability: capability
-            )
+        if outputDeviceSnapshotIsValid,
+           let headphones = headphoneAutoSwitch.newlyConnectedHeadphones(in: outputDevices,
+                selectedID: selectedOutputDeviceID, options: deviceSwitchOptions,
+                switchingBlocked: isV2Enabled || isEnablingRouting) {
+            selectOutputDevice(headphones.id)
+            return
         }
-        if let audioError {
+        discoveredApplications = applicationProvider.applications(excluding: Bundle.main.bundleIdentifier)
+        let targets = Set(discoveredApplications.map { AppAudioTarget(bundleID: $0.bundleID, processID: $0.processID) })
+        // 暂停不让列表跳动；退出或更换 PID 后重新等待输出证据，不能由输入会话推断输出能力。
+        observedAudioOutputs.formIntersection(targets)
+        observedAudioOutputs.formUnion(discoveredApplications.filter(\.isPlayingAudio).map {
+            AppAudioTarget(bundleID: $0.bundleID, processID: $0.processID)
+        })
+        appAudio.reconcile(targets)
+        publishApplications()
+        restoreApplicationsIfNeeded()
+        do { blackHoleAvailable = try audioRouter.isBlackHoleAvailable() }
+        catch {
+            blackHoleAvailable = false
+            routingError = error.localizedDescription
+        }
+        if let routingError {
+            statusMessage = routingError
+        } else if isV2Enabled {
+            statusMessage = "音频路由验证运行中；尚不支持应用独立音量"
+        } else if let audioError {
             statusMessage = audioError
+        } else if apps.contains(where: { $0.capability.isSupported }) {
+            statusMessage = "已启用 \(apps.filter { $0.capability.isSupported }.count) 个应用的独立音量"
         } else if apps.isEmpty {
-            statusMessage = "打开应用后点击刷新"
+            let detectionError = discoveredApplications.compactMap { application -> String? in
+                if case .unavailable(let reason) = application.audioSessionStatus { return reason }
+                return nil
+            }.first
+            statusMessage = detectionError.map { "无法检测应用音频输出：\($0)" } ?? "播放音频后应用会自动显示"
         } else {
-            statusMessage = "已发现 \(apps.count) 个运行中的应用"
+            statusMessage = "已发现 \(apps.count) 个音频应用"
         }
     }
 
-    func refreshLoop() async {
-        while !Task.isCancelled {
+    private func publishApplications() {
+        apps = discoveredApplications.compactMap { application in
+            let target = AppAudioTarget(bundleID: application.bundleID, processID: application.processID)
+            let state = appAudio.state(for: target)
+            // 已启用或待验证的应用必须能继续被找到、停止；保留行不代表音量已经可调节。
+            guard observedAudioOutputs.contains(target) || state.preferences.isEnabled ||
+                  state.capability.isSupported || preparingApps.contains(target.id) else { return nil }
+            let capability: AppAudioCapability
+            switch application.audioSessionStatus {
+            case .detected: capability = state.capability
+            case .notDetected: capability = state.capability.isSupported ? state.capability : .noAudioSession
+            case .unavailable(let reason): capability = .unsupported("无法检测音频会话：\(reason)")
+            }
+            let displayCapability: AppAudioCapability
+            if state.preferences.isEnabled && state.capability == .unsupported("点击启用应用音量") && !application.isPlayingAudio && (application.audioSessionStatus == .detected || application.audioSessionStatus == .notDetected) {
+                displayCapability = .unsupported("已记住，播放音频后自动恢复")
+            } else { displayCapability = capability }
+            return AppVolume(
+                id: target.id, name: application.name, icon: application.icon,
+                volume: Double(state.preferences.volume), capability: displayCapability,
+                isMuted: state.preferences.isMuted,
+                canActivate: application.audioSessionStatus == .detected && appAudio.availability.isSupported && !state.capability.isSupported && !isV2Enabled && !isEnablingRouting,
+                isPreparing: preparingApps.contains(target.id),
+                isRemembered: state.preferences.isEnabled
+            )
+        }
+    }
+
+    var hasAppAudioControl: Bool { appAudio.isActive || !preparingApps.isEmpty }
+
+    private func restoreApplicationsIfNeeded() {
+        guard restoreRememberedAudio, appAudio.availability.isSupported,
+              !isV2Enabled, !isEnablingRouting, activationTasks.isEmpty,
+              preparingApps.isEmpty, apps.filter({ $0.capability.isSupported }).count < 8 else { return }
+        let targets = Set(discoveredApplications.map { AppAudioTarget(bundleID: $0.bundleID, processID: $0.processID) })
+        nextRestoreAttempt = nextRestoreAttempt.filter { targets.contains($0.key) }
+        let now = restorationClock()
+        for application in discoveredApplications where application.isPlayingAudio && !pausedRestoration.contains(application.bundleID) {
+            let target = AppAudioTarget(bundleID: application.bundleID, processID: application.processID)
+            let state = appAudio.state(for: target)
+            guard state.preferences.isEnabled, !state.capability.isSupported,
+                  now >= (nextRestoreAttempt[target] ?? .distantPast) else { continue }
+            // 无信号或设备暂不可用时限速重试，禁止每次刷新创建新 tap。
+            nextRestoreAttempt[target] = now.addingTimeInterval(30)
+            startAppVolume(id: target.id)
+            break
+        }
+    }
+
+    // Permission prompts dismiss MenuBarExtra; hiding a view must not cancel an explicit request.
+    @discardableResult
+    func startAppVolume(id: String) -> Task<Void, Never>? {
+        guard activationTasks[id] == nil else { return nil }
+        let task = Task { [weak self] in
+            await self?.enableAppVolume(id: id)
+            self?.activationTasks[id] = nil
+        }
+        activationTasks[id] = task
+        return task
+    }
+
+    func cancelAppVolume(id: String) {
+        activationTasks[id]?.cancel()
+        disableAppVolume(id: id)
+    }
+
+    func startRoutingValidation() {
+        guard routingTask == nil else { return }
+        routingTask = Task { [weak self] in
+            await self?.enableV2()
+            self?.routingTask = nil
+        }
+    }
+
+    func cancelRoutingValidation() { routingTask?.cancel(); disableV2() }
+
+    func dismissError() { lastError = nil }
+
+    private func report(_ error: Error) {
+        lastError = error.localizedDescription
+        statusMessage = error.localizedDescription
+        Logger(subsystem: "com.volumecontrol.app", category: "audio-control").error("\(error.localizedDescription, privacy: .public)")
+    }
+
+    func enableAppVolume(id: String) async {
+        guard !Task.isCancelled,
+              let application = discoveredApplications.first(where: { "\($0.bundleID):\($0.processID)" == id }),
+              !preparingApps.contains(id), !isV2Enabled, !isEnablingRouting else { return }
+        let target = AppAudioTarget(bundleID: application.bundleID, processID: application.processID)
+        pausedRestoration.remove(target.bundleID)
+        preparingApps.insert(id)
+        publishApplications()
+        defer { preparingApps.remove(id); publishApplications() }
+        do {
+            try await appAudio.activate(target)
+            lastError = nil
+            statusMessage = "\(application.name) 应用音量已启用"
+        } catch is CancellationError {
+            statusMessage = "已取消启用应用音量"
+        } catch { report(error) }
+    }
+
+    func disableAppVolume(id: String) {
+        guard let target = target(for: id) else { return }
+        pausedRestoration.insert(target.bundleID)
+        activationTasks[id]?.cancel()
+        do {
+            try appAudio.deactivate(target)
+            statusMessage = "已恢复该应用的原始播放"
+        } catch { report(error) }
+        publishApplications()
+    }
+
+    func stopAppAudioControl() {
+        pausedRestoration.formUnion(discoveredApplications.map(\.bundleID))
+        activationTasks.values.forEach { $0.cancel() }
+        do {
+            try appAudio.stopAll()
+            routingError = nil
+            lastError = nil
+            statusMessage = "已停止应用音量控制，恢复原始播放"
+        } catch { routingError = error.localizedDescription; report(error) }
+        publishApplications()
+    }
+
+    func suspendAppAudioControl() {
+        restoreRememberedAudio = false
+        backgroundRefreshTask?.cancel()
+        activationTasks.values.forEach { $0.cancel() }
+        do { try appAudio.suspendAll() } catch { report(error) }
+        publishApplications()
+    }
+
+    func selectOutputDevice(_ id: AudioDeviceID) {
+        guard !isV2Enabled, !isEnablingRouting else {
+            report(AudioServiceError.propertyUnavailable("请先停止高级路由测试，再切换输出设备"))
+            return
+        }
+        do {
+            guard try audio.outputDevices().contains(where: { $0.id == id }) else {
+                throw AudioServiceError.propertyUnavailable("所选输出设备已断开或不可用")
+            }
+            guard try audio.defaultOutputDevice() != id else { refresh(); return }
+            activationTasks.values.forEach { $0.cancel() }
+            // 释放绑定旧设备的 tap，但保留用户已授权的自动恢复和音量设置。
+            try appAudio.suspendAll()
+            try audio.selectOutputDevice(id)
+            nextRestoreAttempt.removeAll()
+            lastError = nil
             refresh()
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            statusMessage = "输出已切换到 \(outputDeviceName)"
+        } catch {
+            refresh()
+            report(error)
         }
     }
 
@@ -107,6 +366,7 @@ final class VolumeControlModel: ObservableObject {
             statusMessage = "系统音量已更新"
         } catch {
             statusMessage = error.localizedDescription
+            lastError = error.localizedDescription
             systemVolume = (try? audio.readSystemVolume()) ?? systemVolume
         }
     }
@@ -117,33 +377,111 @@ final class VolumeControlModel: ObservableObject {
             isMuted.toggle()
             statusMessage = isMuted ? "系统已静音" : "已取消静音"
         } catch {
-            statusMessage = error.localizedDescription
+            report(error)
         }
     }
 
     func setAppVolume(id: String, volume: Double) {
-        guard let index = apps.firstIndex(where: { $0.id == id }), apps[index].capability.isSupported else { return }
-        apps[index].volume = Self.clamped(volume)
+        guard let app = apps.first(where: { $0.id == id }), app.capability.isSupported,
+              let target = target(for: id) else { return }
+        do {
+            guard volume.isFinite else { throw AppAudioError.invalidVolume }
+            try appAudio.setVolume(Float(min(max(volume, 0), 1)), for: target)
+            publishApplications()
+            statusMessage = "\(app.name) 音量已更新"
+        } catch { report(error) }
+    }
+
+    func toggleAppMute(id: String) {
+        guard let app = apps.first(where: { $0.id == id }), app.capability.isSupported,
+              let target = target(for: id) else { return }
+        do {
+            try appAudio.setMuted(!app.isMuted, for: target)
+            publishApplications()
+            statusMessage = app.isMuted ? "\(app.name) 已取消静音" : "\(app.name) 已静音"
+        } catch { report(error) }
+    }
+
+    private func target(for id: String) -> AppAudioTarget? {
+        discoveredApplications.map { AppAudioTarget(bundleID: $0.bundleID, processID: $0.processID) }.first { $0.id == id }
+    }
+
+    func enableV2() async {
+        guard !isEnablingRouting, !isV2Enabled else { return }
+        guard !hasAppAudioControl else { statusMessage = "请先停止应用音量控制，再验证 BlackHole 路由"; return }
+        isEnablingRouting = true
+        publishApplications()
+        enableRequestID += 1
+        let request = enableRequestID
+        defer { isEnablingRouting = false; publishApplications() }
+        do {
+            guard try audioRouter.isBlackHoleAvailable() else { throw AudioRoutingError.blackHoleNotFound }
+            let allowed = try await inputPermission.requestAccess()
+            guard !Task.isCancelled, request == enableRequestID else { return }
+            guard allowed else { throw AudioRoutingError.engineFailed("请在系统设置 → 隐私与安全性 → 麦克风中允许音频输入") }
+            try audioRouter.startRouting()
+            isV2Enabled = audioRouter.isRouting
+            routingError = nil
+            lastError = nil
+        } catch {
+            guard !Task.isCancelled, request == enableRequestID else { return }
+            isV2Enabled = false
+            routingError = "启用路由失败：\(error.localizedDescription)"
+            report(error)
+        }
+        refresh()
+    }
+
+    func disableV2() {
+        enableRequestID += 1
+        do {
+            try audioRouter.stopRouting()
+            routingError = nil
+        } catch {
+            routingError = "停止路由失败：\(error.localizedDescription)"
+            report(error)
+        }
+        isV2Enabled = false
+        refresh()
     }
 
     private func refreshSystemAudio() -> String? {
+        var errors: [String] = []
+        outputDeviceSnapshotIsValid = false
         do {
+            outputDevices = try audio.outputDevices()
+            outputDeviceSnapshotIsValid = true
+            deviceMonitor?.updateDevices(outputDevices)
+        } catch {
+            outputDevices = []
+            errors.append(error.localizedDescription)
+        }
+        do {
+            selectedOutputDeviceID = try audio.defaultOutputDevice()
             outputDeviceName = try audio.outputDeviceName()
         } catch {
+            selectedOutputDeviceID = nil
             outputDeviceName = "输出设备不可用"
-            return error.localizedDescription
+            errors.append(error.localizedDescription)
         }
-
         do {
             systemVolume = Self.clamped(try audio.readSystemVolume())
-            isMuted = try audio.readMuted()
-            return nil
+            canAdjustSystemVolume = true
         } catch {
-            return error.localizedDescription
+            canAdjustSystemVolume = false
+            errors.append(error.localizedDescription)
         }
+        do {
+            isMuted = try audio.readMuted()
+            canMuteSystemAudio = true
+        } catch {
+            canMuteSystemAudio = false
+            if !errors.contains(error.localizedDescription) { errors.append(error.localizedDescription) }
+        }
+        return errors.first
     }
 
     private static func clamped(_ value: Double) -> Double {
-        min(max(value, 0), 1)
+        value.isFinite ? min(max(value, 0), 1) : 0
     }
 }

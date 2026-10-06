@@ -1,32 +1,34 @@
-name: Release
+name: Verify Release Packages
 
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  build-and-release:
-    runs-on: macos-14
-    
+  build-release:
+    runs-on: macos-26
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Get version from tag
-      id: version
-      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-    
-    - name: Build release
-      run: swift build -c release
-    
-    - name: Create DMG
-      run: ./scripts/build-dmg.sh ${{ steps.version.outputs.VERSION }}
-    
-    - name: Create Release
-      uses: softprops/action-gh-release@v1
-      with:
-        files: VolumeControl-*.dmg
-        draft: false
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.6.app
+      - name: Run tests
+        run: swift test
+      - name: Build universal release packages
+        run: sh scripts/build-dmg.sh 2.0.0
+      - name: Verify packages
+        run: |
+          codesign --verify --deep --strict VolumeControl.app
+          hdiutil verify dist/VolumeControl-2.0.0-universal.dmg
+          cd dist
+          shasum -a 256 -c SHA256SUMS.txt
+      # 发布由 gh release create 显式完成，CI 不覆盖已经验收的下载资产。
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VolumeControl-universal-release
+          path: dist/*
+          if-no-files-found: error
