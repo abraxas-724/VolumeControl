@@ -59,9 +59,15 @@ final class VolumeControlModel: ObservableObject {
     @Published private(set) var blackHoleAvailable = false
     @Published private(set) var isEnablingRouting = false
     @Published private(set) var lastError: String?
+    @Published var deviceSwitchOptions: DeviceSwitchOptions {
+        didSet { if deviceSwitchOptions != oldValue { deviceSwitchStorage.save(deviceSwitchOptions) } }
+    }
 
     private let audio: any AudioService
     private let applicationProvider: any ApplicationProvider
+    private let deviceSwitchStorage: any DeviceSwitchPreferenceStoring
+    private var headphoneAutoSwitch = HeadphoneAutoSwitchPolicy()
+    private var outputDeviceSnapshotIsValid = false
     private var deviceMonitor: AudioDeviceMonitor?
     
     private let appAudio: any AppAudioControlling
@@ -91,10 +97,14 @@ final class VolumeControlModel: ObservableObject {
         inputPermission: any AudioInputPermissionProviding = AudioInputPermission(),
         appAudio: (any AppAudioControlling)? = nil,
         restoreRememberedAudio: Bool = true,
+        deviceSwitchStorage: (any DeviceSwitchPreferenceStoring)? = nil,
         restorationClock: @escaping () -> Date = Date.init
     ) {
         self.audio = audio
         self.applicationProvider = applicationProvider
+        let switchStorage = deviceSwitchStorage ?? UserDefaultsDeviceSwitchPreferences()
+        self.deviceSwitchStorage = switchStorage
+        deviceSwitchOptions = switchStorage.load()
         self.audioRouter = audioRouter ?? AudioDeviceRouter()
         self.inputPermission = inputPermission
         self.appAudio = appAudio ?? ProcessTapVolumeController()
@@ -152,6 +162,13 @@ final class VolumeControlModel: ObservableObject {
 
     func refresh() {
         let audioError = refreshSystemAudio()
+        if outputDeviceSnapshotIsValid,
+           let headphones = headphoneAutoSwitch.newlyConnectedHeadphones(in: outputDevices,
+                selectedID: selectedOutputDeviceID, options: deviceSwitchOptions,
+                switchingBlocked: isV2Enabled || isEnablingRouting) {
+            selectOutputDevice(headphones.id)
+            return
+        }
         discoveredApplications = applicationProvider.applications(excluding: Bundle.main.bundleIdentifier)
         let targets = Set(discoveredApplications.map { AppAudioTarget(bundleID: $0.bundleID, processID: $0.processID) })
         // 暂停不让列表跳动；退出或更换 PID 后重新等待输出证据，不能由输入会话推断输出能力。
@@ -430,8 +447,11 @@ final class VolumeControlModel: ObservableObject {
 
     private func refreshSystemAudio() -> String? {
         var errors: [String] = []
+        outputDeviceSnapshotIsValid = false
         do {
             outputDevices = try audio.outputDevices()
+            outputDeviceSnapshotIsValid = true
+            deviceMonitor?.updateDevices(outputDevices)
         } catch {
             outputDevices = []
             errors.append(error.localizedDescription)

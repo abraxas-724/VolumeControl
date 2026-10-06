@@ -12,12 +12,14 @@ struct SettingsView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     private let loginItemController: any LoginItemControlling
+    private let audioModel: VolumeControlModel?
     let openPrivacySettings: () -> Void
     let quitApplication: () -> Void
 
-    init(preferences: InterfacePreferences, loginItemController: (any LoginItemControlling)? = nil,
+    init(preferences: InterfacePreferences, loginItemController: (any LoginItemControlling)? = nil, audioModel: VolumeControlModel? = nil,
          initialPage: Int = 0, openPrivacySettings: @escaping () -> Void = {}, quitApplication: @escaping () -> Void = {}) {
         self.preferences = preferences
+        self.audioModel = audioModel
         _page = State(initialValue: initialPage)
         let controller = loginItemController ?? SystemLoginItemController()
         self.loginItemController = controller
@@ -141,6 +143,7 @@ struct SettingsView: View {
 
     private var general: some View {
         Group {
+            if let audioModel { HeadphoneSwitchSettings(model: audioModel) }
             section("启动与显示", symbol: "switch.2") {
                 toggleRow("登录时启动", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, enabled in updateLogin(enabled) }

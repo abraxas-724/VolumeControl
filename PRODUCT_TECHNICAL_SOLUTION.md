@@ -149,6 +149,8 @@ protocol AppAudioRepository {
 3. 写入前把输入限制在 `[0, 1]`，写入失败保留旧值并向 ViewModel 返回错误。
 4. 注册设备属性监听器，收到设备、音量、静音变化后通过 `AsyncStream` 合并更新。
 
+耳机自动切换由 `HeadphoneAutoSwitchPolicy` 对完整设备快照做接入边沿判断，元数据适配器读取输出终端类型、插孔连接状态和持久 UID。初始基线及手动选择保持不变，仅新接入耳机通过既有设备切换事务写入。偏好通过独立仓储注入模型；高级路由期间跳过，读取失败保留基线，清理失败中止，完整规则与验收边界见 [耳机自动切换](docs/HEADPHONE_AUTO_SWITCH.md)。
+
 ### 5.2 应用发现
 
 `NSWorkspace.shared.runningApplications` 用于发现普通应用和图标；Core Audio 进程对象列表用于判断该进程是否真的创建了音频会话。两个来源通过 PID 和 bundle ID 合并，避免把没有音频输出的应用误显示为可控制。

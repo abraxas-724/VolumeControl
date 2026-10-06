@@ -39,10 +39,14 @@ final class SettingsWindowTests: XCTestCase {
         XCTAssertLessThanOrEqual(host.fittingSize.height, 700)
         if let path = ProcessInfo.processInfo.environment["VOLUMECONTROL_SETTINGS_SNAPSHOT"] {
             let preferences = InterfacePreferences(storage: MemoryInterfacePreferences())
+            let audioModel = VolumeControlModel(audio: FakeAudioService(), applicationProvider: FakeApplicationProvider(values: []),
+                audioRouter: ModelRoutingStub(), monitorDevices: false, inputPermission: ModelPermissionStub(),
+                appAudio: UnsupportedAppAudioControl(), restoreRememberedAudio: false,
+                deviceSwitchStorage: MemoryDeviceSwitchPreferences())
             preferences.options.motion = .off
             func capture(_ destination: String, page: Int = 0) async throws {
                 let preview = NSHostingView(rootView: SettingsView(preferences: preferences,
-                    loginItemController: SettingsLoginStub(), initialPage: page))
+                    loginItemController: SettingsLoginStub(), audioModel: audioModel, initialPage: page))
                 let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 660),
                                       styleMask: [.borderless], backing: .buffered, defer: false)
                 window.contentView = preview

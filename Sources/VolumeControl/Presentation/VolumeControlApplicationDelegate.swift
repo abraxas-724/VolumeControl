@@ -19,7 +19,7 @@ final class VolumeControlApplicationDelegate: NSObject, NSApplicationDelegate {
         self.preferences = preferences
         installApplicationMenu()
         settingsWindow = SettingsWindowController(preferences: preferences, makeContent: {
-            AnyView(SettingsView(preferences: preferences, openPrivacySettings: {
+            AnyView(SettingsView(preferences: preferences, audioModel: model, openPrivacySettings: {
                 if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security") {
                     NSWorkspace.shared.open(url)
                 }

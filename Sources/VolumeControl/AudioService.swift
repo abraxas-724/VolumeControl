@@ -101,7 +101,7 @@ struct CoreAudioService: AudioService {
             var nameSize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
             try check(AudioObjectGetPropertyData(device, &nameAddress, 0, nil, &nameSize, &name), "读取输出设备名称")
             guard let name else { throw AudioServiceError.propertyUnavailable("输出设备名称") }
-            return OutputAudioDevice(id: device, name: name.takeRetainedValue() as String)
+            return OutputDeviceMetadata().device(device, name: name.takeRetainedValue() as String)
         }.sorted { $0.name == $1.name ? $0.id < $1.id : $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
