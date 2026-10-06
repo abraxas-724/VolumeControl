@@ -5,18 +5,26 @@ enum PanelStyle { static let cornerRadius: CGFloat = 18 }
 struct PanelCard: ViewModifier {
     @Environment(\.interfaceOptions) private var options
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @ViewBuilder
     func body(content: Content) -> some View {
-        content.padding(options.density.cardPadding)
-            .background {
+        let surface = options.effectiveSurface(nativeGlassAvailable: InterfaceAppearanceSupport.nativeGlassAvailable,
+                                               reduceTransparency: reduceTransparency)
+        let padded = content.padding(options.density.cardPadding)
+        if #available(macOS 26.0, *), surface == .liquid {
+            // 将正文交给玻璃合成，才能获得原生光学边缘、背景透色及自适应文字。
+            padded.environment(\.isInsideGlassCard, true)
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        } else {
+            padded.background {
                 let shape = RoundedRectangle(cornerRadius: PanelStyle.cornerRadius, style: .continuous)
-                if options.surface != .standard && !reduceTransparency {
-                    shape.fill(.regularMaterial)
-                } else { shape.fill(Color(nsColor: .controlBackgroundColor)) }
+                if surface == .frosted { shape.fill(.regularMaterial) }
+                else { shape.fill(Color(nsColor: .controlBackgroundColor)) }
             }
             .overlay {
                 RoundedRectangle(cornerRadius: PanelStyle.cornerRadius, style: .continuous)
                     .strokeBorder(.primary.opacity(0.06), lineWidth: 1)
             }
+        }
     }
 }
 

@@ -113,9 +113,18 @@ final class MenuBarPopoverControllerTests: XCTestCase {
         NSApplication.shared.setActivationPolicy(.accessory)
         defer { NSApplication.shared.setActivationPolicy(oldPolicy) }
         let preferences = InterfacePreferences(storage: MemoryInterfacePreferences())
-        let model = VolumeControlModel(audio: FakeAudioService(), applicationProvider: FakeApplicationProvider(values: []),
+        let audio = FakeAudioService()
+        audio.volume = 0.37
+        let application = DiscoveredApplication(bundleID: "test.chrome", name: "Google Chrome",
+            icon: NSImage(systemSymbolName: "app.fill", accessibilityDescription: nil)!, processID: 100,
+            audioSessionStatus: .detected, isPlayingAudio: true)
+        let appAudio = ProcessTapVolumeController(factory: TestProcessFactory(), storage: MemoryAppAudioPreferences())
+        let model = VolumeControlModel(audio: audio, applicationProvider: FakeApplicationProvider(values: [application]),
             audioRouter: ModelRoutingStub(), monitorDevices: false, inputPermission: ModelPermissionStub(),
-            appAudio: UnsupportedAppAudioControl())
+            appAudio: appAudio)
+        await model.enableAppVolume(id: "test.chrome:100")
+        model.setAppVolume(id: "test.chrome:100", volume: 0.83)
+        defer { model.stopAppAudioControl() }
         let controller = MenuBarPopoverController(preferences: preferences,
             content: AnyView(VolumePanel(model: model, preferences: preferences, openSettings: {})))
         controller.start()
@@ -185,6 +194,11 @@ final class MenuBarPopoverControllerTests: XCTestCase {
         XCTAssertTrue(controller.isShown)
         XCTAssertNil(controller.presentationWindow?.appearance)
         try captureComposite(try XCTUnwrap(controller.presentationWindow), name: "system-liquid")
+        for theme in [InterfaceTheme.light, .dark] {
+            preferences.options.theme = theme
+            try await Task.sleep(nanoseconds: 250_000_000)
+            try captureComposite(try XCTUnwrap(controller.presentationWindow), name: "neutral-liquid-\(theme.rawValue)")
+        }
         for _ in 0..<3 {
             button.performClick(nil)
             try await waitForVisibility(false)

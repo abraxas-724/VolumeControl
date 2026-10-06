@@ -18,6 +18,7 @@ struct VolumePanel: View {
 
     var body: some View {
         panelContent
+            .modifier(PanelGlassComposition())
             .modifier(InterfaceAppearance(options: options))
     }
 

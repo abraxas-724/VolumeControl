@@ -16,11 +16,8 @@ struct PanelBackdrop: View {
             case .frosted:
                 WindowFrostedBackdrop()
             case .liquid:
-                if #available(macOS 26.0, *) {
-                    // regular 由系统管理自适应对比度与玻璃外观；clear 会固定为清透材质。
-                    Color.clear.glassEffect(.regular,
-                        in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                } else { WindowFrostedBackdrop() }
+                // 分区玻璃由实际卡片承载；底层只采样窗口后方，避免大玻璃覆盖小玻璃。
+                WindowFrostedBackdrop(material: .underWindowBackground)
             }
             if surface == .frosted {
                 LinearGradient(colors: [options.accent.color.opacity(0.06), .clear, options.accent.color.opacity(0.025)],
@@ -35,6 +32,7 @@ struct PanelBackdrop: View {
 /// behindWindow 采样窗口后面的桌面/应用；不能用不透明底色遮住该材质。
 struct WindowFrostedBackdrop: NSViewRepresentable {
     @Environment(\.colorScheme) private var colorScheme
+    var material: NSVisualEffectView.Material = .popover
 
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
@@ -46,7 +44,7 @@ struct WindowFrostedBackdrop: NSViewRepresentable {
     func updateNSView(_ view: NSVisualEffectView, context: Context) { configure(view) }
 
     private func configure(_ view: NSVisualEffectView) {
-        view.material = .popover
+        view.material = material
         view.blendingMode = .behindWindow
         view.state = .active
         view.appearance = NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua)

@@ -4,10 +4,19 @@ private struct InterfaceOptionsKey: EnvironmentKey {
     static let defaultValue = InterfaceOptions()
 }
 
+private struct InsideGlassCardKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 extension EnvironmentValues {
     var interfaceOptions: InterfaceOptions {
         get { self[InterfaceOptionsKey.self] }
         set { self[InterfaceOptionsKey.self] = newValue }
+    }
+
+    var isInsideGlassCard: Bool {
+        get { self[InsideGlassCardKey.self] }
+        set { self[InsideGlassCardKey.self] = newValue }
     }
 }
 
@@ -44,7 +53,7 @@ struct InterfaceAppearance: ViewModifier {
     }
 }
 
-/// 主背景和交互控件使用原生玻璃，正文保持稳定内容层；旧系统使用系统磨砂材质。
+/// 音量卡片与独立控件使用原生玻璃，底层保留磨砂；旧系统使用系统磨砂材质。
 enum InterfaceAppearanceSupport {
     static var nativeGlassAvailable: Bool {
         if #available(macOS 26.0, *) { return true }
@@ -55,6 +64,7 @@ enum InterfaceAppearanceSupport {
 struct InteractiveSurface: ViewModifier {
     @Environment(\.interfaceOptions) private var options
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.isInsideGlassCard) private var isInsideGlassCard
     var radius: CGFloat = 12
     var emphasized = false
 
@@ -62,7 +72,11 @@ struct InteractiveSurface: ViewModifier {
     func body(content: Content) -> some View {
         let surface = options.effectiveSurface(nativeGlassAvailable: InterfaceAppearanceSupport.nativeGlassAvailable,
                                                reduceTransparency: reduceTransparency)
-        if surface == .liquid {
+        if surface == .liquid && isInsideGlassCard {
+            // 卡片已是玻璃：内部按钮用薄填充，避免玻璃套玻璃破坏采样。
+            content.background(emphasized ? options.accent.color.opacity(0.14) : Color.primary.opacity(0.05),
+                               in: RoundedRectangle(cornerRadius: radius))
+        } else if surface == .liquid {
             if #available(macOS 26.0, *) {
                 content.glassEffect(.regular.tint(emphasized ? options.accent.color.opacity(0.2) : nil).interactive(),
                                     in: RoundedRectangle(cornerRadius: radius))
@@ -78,6 +92,16 @@ struct InteractiveSurface: ViewModifier {
     private func frosted(_ content: Content) -> some View {
         content.background(.thinMaterial, in: RoundedRectangle(cornerRadius: radius))
             .overlay(RoundedRectangle(cornerRadius: radius).strokeBorder(.primary.opacity(0.08)))
+    }
+}
+
+/// 容器始终存在，只让分区材质随偏好更新，搜索和筛选不随玻璃开关重建。
+struct PanelGlassComposition: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            GlassEffectContainer(spacing: 0) { content }
+        } else { content }
     }
 }
 
