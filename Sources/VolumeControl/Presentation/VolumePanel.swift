@@ -6,7 +6,6 @@ struct VolumePanel: View {
     let openSettings: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var filterNamespace
-    @State private var appeared = false
     private var options: InterfaceOptions { preferences.options }
     private var accent: Color { options.accent.color }
     @State private var showInstallSheet = false
@@ -18,7 +17,7 @@ struct VolumePanel: View {
     }
 
     var body: some View {
-        GlassControlGroup { panelContent }
+        panelContent
             .modifier(InterfaceAppearance(options: options))
     }
 
@@ -36,14 +35,10 @@ struct VolumePanel: View {
         .frame(width: 480)
         .fixedSize(horizontal: false, vertical: true)
         .background(InterfaceBackdrop())
-        .opacity(appeared ? 1 : 0)
-        .offset(y: appeared || !options.allowsMotion(reduceMotion: reduceMotion) ? 0 : 5)
         .animation(options.animation(reduceMotion: reduceMotion), value: filter)
         .onAppear {
             filter = options.defaultToEnabledApps ? .enabled : .all
-            withAnimation(options.animation(reduceMotion: reduceMotion)) { appeared = true }
         }
-        .onDisappear { appeared = false }
         .onChange(of: options.defaultToEnabledApps) { _, enabled in filter = enabled ? .enabled : .all }
         .sheet(isPresented: $showInstallSheet) {
             BlackHoleInstallView(installGuide: model.blackHoleInstallGuide)

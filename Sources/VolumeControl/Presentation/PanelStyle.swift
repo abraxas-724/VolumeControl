@@ -36,17 +36,13 @@ private struct PanelButtonFeedback<Label: View>: View {
     let options: InterfaceOptions
     let reduceMotion: Bool
     let isEnabled: Bool
-    @State private var hovered = false
 
     var body: some View {
         label.font(.system(size: 13, weight: .medium)).frame(width: 32, height: 32)
             .modifier(InteractiveSurface())
             .overlay(RoundedRectangle(cornerRadius: 12).fill(.primary.opacity(isPressed ? 0.08 : 0)))
             .contentShape(RoundedRectangle(cornerRadius: 12))
-            .scaleEffect(options.allowsMotion(reduceMotion: reduceMotion) && isEnabled ? (isPressed ? 0.9 : (hovered && options.motion == .playful ? 1.06 : 1)) : 1)
             .opacity(isEnabled ? 1 : 0.45)
             .animation(options.animation(reduceMotion: reduceMotion), value: isPressed)
-            .animation(options.animation(reduceMotion: reduceMotion), value: hovered)
-            .onHover { hovered = $0 }
     }
 }

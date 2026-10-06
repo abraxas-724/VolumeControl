@@ -14,8 +14,9 @@ enum InterfaceSurface: String, CaseIterable, Identifiable {
 
 enum InterfaceMotion: String, CaseIterable, Identifiable {
     case off, subtle, playful
+    static let selectableCases: [Self] = [.off, .subtle]
     var id: Self { self }
-    var label: String { switch self { case .off: return "关闭"; case .subtle: return "轻柔"; case .playful: return "灵动" } }
+    var label: String { switch self { case .off: return "关闭"; case .subtle: return "系统展开"; case .playful: return "系统展开（旧）" } }
 }
 
 enum InterfaceAccent: String, CaseIterable, Identifiable {

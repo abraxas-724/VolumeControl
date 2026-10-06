@@ -52,7 +52,7 @@ VolumeControl 是一个 macOS 状态栏工具。用户无需打开系统设置�
 
 ```text
 ┌──────────────────────────────────────────────┐
-│ SwiftUI MenuBarExtra / Settings              │
+│ AppKit NSStatusItem / NSPopover / Settings    │
 │  VolumePanel  AppVolumeRow  SettingsView     │
 └──────────────────────┬───────────────────────┘
                        │ ViewModel / Actions
@@ -86,6 +86,8 @@ VolumeControl 是一个 macOS 状态栏工具。用户无需打开系统设置�
 - **Domain**：定义值类型、能力状态和业务规则，例如音量范围、静音恢复值和排序规则。
 - **Infrastructure**：包装 Core Audio、NSWorkspace、UserDefaults 和可选辅助组件。
 - **Helper**：只有在公共 Core Audio 不能完成进程级增益时才启用；与主应用通过 XPC 或本地受限 IPC 通讯。
+
+状态栏窗口由 `MenuBarPopoverController` 管理，SwiftUI 继续绘制面板和设置内容。使用公共 `NSPopover` 锚定声音图标，按界面偏好及系统减少动态效果控制原生展开/收起动画。面板根内容始终可见，玻璃材质只在局部控件应用，避免切换材质时触发根视图生命周期与显隐状态冲突。设置继续使用独立单实例窗口；AppKit 启动保留设置、退出和文本编辑快捷键。
 
 ## 4. 核心数据模型与接口
 

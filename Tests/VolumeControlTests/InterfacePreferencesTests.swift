@@ -10,6 +10,15 @@ final class MemoryInterfacePreferences: InterfacePreferenceStoring {
 
 @MainActor
 final class InterfacePreferencesTests: XCTestCase {
+    func testLegacyPlayfulMotionMigratesToNativeOpeningWithoutWritingOnLoad() {
+        let store = MemoryInterfacePreferences()
+        store.options.motion = .playful
+        let preferences = InterfacePreferences(storage: store)
+        XCTAssertEqual(preferences.options.motion, .subtle)
+        XCTAssertEqual(store.saves, 0)
+        XCTAssertEqual(InterfaceMotion.selectableCases, [.off, .subtle])
+    }
+
     func testLoadingDoesNotWriteAndSelectionsSurviveNewModel() {
         let store = MemoryInterfacePreferences()
         let model = InterfacePreferences(storage: store)

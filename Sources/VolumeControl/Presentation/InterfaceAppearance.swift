@@ -27,7 +27,7 @@ extension InterfaceTheme {
 extension InterfaceOptions {
     func animation(reduceMotion: Bool) -> Animation? {
         guard allowsMotion(reduceMotion: reduceMotion) else { return nil }
-        return motion == .playful ? .spring(response: 0.42, dampingFraction: 0.68) : .easeInOut(duration: 0.18)
+        return .easeInOut(duration: 0.18)
     }
 }
 
@@ -106,15 +106,9 @@ struct InterfaceBackdrop: View {
     }
 }
 
-/// 仅在用户选择灵动且系统允许时响应静音切换，不播放持续动画。
 struct VolumeSymbol: View {
     let muted: Bool
-    @Environment(\.interfaceOptions) private var options
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @ViewBuilder var body: some View {
-        let symbol = Image(systemName: muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-        if options.motion == .playful && options.allowsMotion(reduceMotion: reduceMotion) {
-            symbol.symbolEffect(.bounce, value: muted)
-        } else { symbol }
+    var body: some View {
+        Image(systemName: muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
     }
 }

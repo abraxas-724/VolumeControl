@@ -101,11 +101,11 @@ struct SettingsView: View {
                     }
                 }.frame(maxWidth: .infinity)
             }
-            section("交互动效", symbol: "sparkles") {
-                Picker("交互动效", selection: $preferences.options.motion) {
-                    ForEach(InterfaceMotion.allCases) { Text($0.label).tag($0) }
+            section("面板展开动效", symbol: "sparkles") {
+                Picker("面板展开动效", selection: $preferences.options.motion) {
+                    ForEach(InterfaceMotion.selectableCases) { Text($0.label).tag($0) }
                 }.pickerStyle(.segmented).labelsHidden()
-                caption(reduceMotion ? "系统已开启减少动态效果，自定义动效暂停。" : "轻柔：淡入与柔和反馈。灵动：弹簧切换、悬停与按压回弹。")
+                caption(reduceMotion ? "系统已开启减少动态效果，面板直接显示。" : "点击状态栏声音图标时，面板从图标处原生展开；再次点击收起。")
             }
             section("布局密度", symbol: "rectangle.compress.vertical") {
                 Picker("布局密度", selection: $preferences.options.density) {
