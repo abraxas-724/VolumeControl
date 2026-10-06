@@ -199,6 +199,28 @@ final class MenuBarPopoverControllerTests: XCTestCase {
             try await Task.sleep(nanoseconds: 250_000_000)
             try captureComposite(try XCTUnwrap(controller.presentationWindow), name: "neutral-liquid-\(theme.rawValue)")
         }
+        // 文字与网格可区分真正透出和只透色的浓磨砂；所有背景内容都由测试自己生成。
+        backdropView.rootView = AnyView(ZStack {
+            LinearGradient(colors: [Color.cyan.opacity(0.4), Color.white, Color.orange.opacity(0.35)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            VStack(spacing: 18) {
+                ForEach(0..<16) { _ in
+                    Text("GLASS · VolumeControl · GLASS")
+                        .font(.system(size: 24, weight: .light)).foregroundStyle(.gray.opacity(0.45))
+                }
+            }.rotationEffect(.degrees(-12))
+        })
+        preferences.options.theme = .light
+        try await Task.sleep(nanoseconds: 250_000_000)
+        try captureComposite(try XCTUnwrap(controller.presentationWindow), name: "pattern-clear-default")
+        preferences.options.glassBackgroundTransparency = 1
+        try await Task.sleep(nanoseconds: 250_000_000)
+        try captureComposite(try XCTUnwrap(controller.presentationWindow), name: "pattern-clear-maximum")
+        preferences.options.glassStyle = .system
+        try await Task.sleep(nanoseconds: 250_000_000)
+        try captureComposite(try XCTUnwrap(controller.presentationWindow), name: "pattern-system-adaptive")
+        preferences.options.glassStyle = .clear
+        preferences.options.glassBackgroundTransparency = 0.88
         for _ in 0..<3 {
             button.performClick(nil)
             try await waitForVisibility(false)

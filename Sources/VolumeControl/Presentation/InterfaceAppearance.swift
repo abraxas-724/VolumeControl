@@ -33,6 +33,11 @@ extension InterfaceTheme {
     }
 }
 
+@available(macOS 26.0, *)
+extension InterfaceGlassStyle {
+    var material: Glass { self == .clear ? .clear : .regular }
+}
+
 extension InterfaceOptions {
     func animation(reduceMotion: Bool) -> Animation? {
         guard allowsMotion(reduceMotion: reduceMotion) else { return nil }
@@ -53,7 +58,7 @@ struct InterfaceAppearance: ViewModifier {
     }
 }
 
-/// 音量卡片与独立控件使用原生玻璃，底层保留磨砂；旧系统使用系统磨砂材质。
+/// 音量卡片与独立控件使用原生玻璃；旧系统使用系统磨砂材质。
 enum InterfaceAppearanceSupport {
     static var nativeGlassAvailable: Bool {
         if #available(macOS 26.0, *) { return true }
@@ -78,7 +83,7 @@ struct InteractiveSurface: ViewModifier {
                                in: RoundedRectangle(cornerRadius: radius))
         } else if surface == .liquid {
             if #available(macOS 26.0, *) {
-                content.glassEffect(.regular.tint(emphasized ? options.accent.color.opacity(0.2) : nil).interactive(),
+                content.glassEffect(options.glassStyle.material.tint(emphasized ? options.accent.color.opacity(0.2) : nil).interactive(),
                                     in: RoundedRectangle(cornerRadius: radius))
             } else { frosted(content) }
         } else if surface == .frosted {

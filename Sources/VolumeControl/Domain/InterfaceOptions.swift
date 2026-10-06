@@ -19,6 +19,12 @@ enum InterfaceMotion: String, CaseIterable, Identifiable {
     var label: String { switch self { case .off: return "关闭"; case .subtle: return "系统展开"; case .playful: return "系统展开（旧）" } }
 }
 
+enum InterfaceGlassStyle: String, CaseIterable, Identifiable {
+    case clear, system
+    var id: Self { self }
+    var label: String { self == .clear ? "清透" : "系统自适应" }
+}
+
 enum InterfaceAccent: String, CaseIterable, Identifiable {
     case indigo, blue, teal, green, orange, pink
     var id: Self { self }
@@ -37,6 +43,8 @@ enum InterfaceDensity: String, CaseIterable, Identifiable {
 struct InterfaceOptions: Equatable {
     var theme: InterfaceTheme = .system
     var surface: InterfaceSurface = .standard
+    var glassStyle: InterfaceGlassStyle = .clear
+    var glassBackgroundTransparency: Double = 0.88
     var motion: InterfaceMotion = .subtle
     var accent: InterfaceAccent = .indigo
     var density: InterfaceDensity = .comfortable
@@ -44,6 +52,15 @@ struct InterfaceOptions: Equatable {
     var showTips = true
     var showAdvanced = true
     var defaultToEnabledApps = false
+
+    // 只减轻背景磨砂，不改变正文或原生玻璃的透明度；坏偏好不能传入 AppKit。
+    var safeGlassBackgroundTransparency: Double {
+        glassBackgroundTransparency.isFinite ? min(1, max(0, glassBackgroundTransparency)) : 0.88
+    }
+
+    var glassBackgroundOpacity: Double {
+        glassStyle == .clear ? 1 - safeGlassBackgroundTransparency : 1
+    }
 
     func effectiveSurface(nativeGlassAvailable: Bool, reduceTransparency: Bool) -> InterfaceSurface {
         guard !reduceTransparency else { return .standard }

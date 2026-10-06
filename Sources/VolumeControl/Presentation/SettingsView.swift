@@ -79,7 +79,27 @@ struct SettingsView: View {
                 }.pickerStyle(.segmented).labelsHidden()
                 if preferences.options.surface == .liquid {
                     if #available(macOS 26.0, *) {
-                        caption("系统与应用音量卡片使用苹果原生液态玻璃，底层背景保留系统磨砂。颜色模式选“跟随系统”可同步浅色与深色。")
+                        Picker("玻璃风格", selection: $preferences.options.glassStyle) {
+                            ForEach(InterfaceGlassStyle.allCases) { Text($0.label).tag($0) }
+                        }.pickerStyle(.segmented)
+                        if preferences.options.glassStyle == .clear {
+                            HStack {
+                                Text("背景透明度")
+                                Spacer()
+                                Text("\(Int(preferences.options.safeGlassBackgroundTransparency * 100))%")
+                                    .monospacedDigit().foregroundStyle(.secondary)
+                            }
+                            Slider(value: $preferences.options.glassBackgroundTransparency, in: 0...1)
+                                .accessibilityLabel("背景透明度")
+                            HStack {
+                                Text("更多磨砂")
+                                Spacer()
+                                Text("更加透明")
+                            }.font(.caption).foregroundStyle(.secondary)
+                            caption("使用苹果原生清透液态玻璃；透明度只调整底层磨砂，文字和按钮保持清晰。颜色模式可独立跟随系统。")
+                        } else {
+                            caption("使用苹果原生自适应液态玻璃与系统磨砂，系统自动调整明暗和对比度，背景遮挡更强。")
+                        }
                     } else { caption("原生液态玻璃需要 macOS 26+；当前使用磨砂玻璃。") }
                 }
                 if preferences.options.surface == .frosted { caption("主页面背景使用窗口后方的磨砂材质，正文卡片保持清晰。") }

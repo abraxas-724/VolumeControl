@@ -17,7 +17,8 @@ struct PanelBackdrop: View {
                 WindowFrostedBackdrop()
             case .liquid:
                 // 分区玻璃由实际卡片承载；底层只采样窗口后方，避免大玻璃覆盖小玻璃。
-                WindowFrostedBackdrop(material: .underWindowBackground)
+                WindowFrostedBackdrop(material: .underWindowBackground,
+                                      opacity: options.glassBackgroundOpacity)
             }
             if surface == .frosted {
                 LinearGradient(colors: [options.accent.color.opacity(0.06), .clear, options.accent.color.opacity(0.025)],
@@ -33,6 +34,7 @@ struct PanelBackdrop: View {
 struct WindowFrostedBackdrop: NSViewRepresentable {
     @Environment(\.colorScheme) private var colorScheme
     var material: NSVisualEffectView.Material = .popover
+    var opacity: Double = 1
 
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
@@ -47,6 +49,7 @@ struct WindowFrostedBackdrop: NSViewRepresentable {
         view.material = material
         view.blendingMode = .behindWindow
         view.state = .active
+        view.alphaValue = opacity.isFinite ? min(1, max(0, opacity)) : 1
         view.appearance = NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua)
     }
 }

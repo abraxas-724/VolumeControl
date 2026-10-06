@@ -10,6 +10,33 @@ final class MemoryInterfacePreferences: InterfacePreferenceStoring {
 
 @MainActor
 final class InterfacePreferencesTests: XCTestCase {
+    func testLiquidDefaultsAreClearAndTransparencyIsValidated() {
+        var options = InterfaceOptions()
+        XCTAssertEqual(options.glassStyle, .clear)
+        XCTAssertEqual(options.glassBackgroundOpacity, 0.12, accuracy: 0.0001)
+        for (value, expected) in [(Double.nan, 0.88), (.infinity, 0.88), (-0.2, 0), (1.2, 1)] {
+            options.glassBackgroundTransparency = value
+            XCTAssertEqual(options.safeGlassBackgroundTransparency, expected)
+        }
+        options.glassStyle = .system
+        XCTAssertEqual(options.glassBackgroundOpacity, 1)
+    }
+
+    func testGlassChoicesPersistAndResetWithoutWritingOnLoad() {
+        let store = MemoryInterfacePreferences()
+        let preferences = InterfacePreferences(storage: store)
+        XCTAssertEqual(store.saves, 0)
+        preferences.options.glassStyle = .system
+        preferences.options.glassBackgroundTransparency = 0.95
+        let reloaded = InterfacePreferences(storage: store)
+        XCTAssertEqual(reloaded.options.glassStyle, .system)
+        XCTAssertEqual(reloaded.options.glassBackgroundTransparency, 0.95)
+        XCTAssertEqual(store.saves, 2)
+        reloaded.resetAppearance()
+        XCTAssertEqual(reloaded.options.glassStyle, .clear)
+        XCTAssertEqual(reloaded.options.glassBackgroundTransparency, 0.88)
+    }
+
     func testLegacyPlayfulMotionMigratesToNativeOpeningWithoutWritingOnLoad() {
         let store = MemoryInterfacePreferences()
         store.options.motion = .playful

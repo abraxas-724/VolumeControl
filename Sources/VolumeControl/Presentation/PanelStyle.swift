@@ -13,7 +13,7 @@ struct PanelCard: ViewModifier {
         if #available(macOS 26.0, *), surface == .liquid {
             // 将正文交给玻璃合成，才能获得原生光学边缘、背景透色及自适应文字。
             padded.environment(\.isInsideGlassCard, true)
-                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .glassEffect(options.glassStyle.material, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         } else {
             padded.background {
                 let shape = RoundedRectangle(cornerRadius: PanelStyle.cornerRadius, style: .continuous)

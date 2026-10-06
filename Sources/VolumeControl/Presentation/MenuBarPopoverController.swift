@@ -129,6 +129,13 @@ final class MenuBarPopoverController: NSObject, NSPopoverDelegate {
                                                reduceTransparency: reduceTransparency())
         hosting.view.window?.isOpaque = surface == .standard
         hosting.view.window?.backgroundColor = surface == .standard ? .windowBackgroundColor : .clear
+        if #available(macOS 26.0, *) {
+            // NSPopover 的外壳也会挡住内容；只使用公开玻璃类型和 style，不查找私有类或改动结构。
+            // 系统未提供这种外壳时保留原样，仍使用系统的锚定、关闭行为及展开动画。
+            for glass in hosting.view.superview?.subviews.compactMap({ $0 as? NSGlassEffectView }) ?? [] {
+                glass.style = surface == .liquid && options.glassStyle == .clear ? .clear : .regular
+            }
+        }
     }
 
     private func updateContentSize(anchor: NSView?) {

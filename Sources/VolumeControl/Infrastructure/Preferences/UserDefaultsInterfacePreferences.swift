@@ -8,6 +8,11 @@ struct UserDefaultsInterfacePreferences: InterfacePreferenceStoring {
         var options = InterfaceOptions()
         options.theme = value("interface.theme", fallback: options.theme)
         options.surface = value("interface.surface", fallback: options.surface)
+        options.glassStyle = value("interface.glassStyle", fallback: options.glassStyle)
+        if let transparency = defaults.object(forKey: "interface.glassBackgroundTransparency") as? Double {
+            options.glassBackgroundTransparency = transparency
+            options.glassBackgroundTransparency = options.safeGlassBackgroundTransparency
+        }
         options.motion = value("interface.motion", fallback: options.motion)
         options.accent = value("interface.accent", fallback: options.accent)
         options.density = value("interface.density", fallback: options.density)
@@ -22,6 +27,8 @@ struct UserDefaultsInterfacePreferences: InterfacePreferenceStoring {
     func save(_ options: InterfaceOptions) {
         defaults.set(options.theme.rawValue, forKey: "interface.theme")
         defaults.set(options.surface.rawValue, forKey: "interface.surface")
+        defaults.set(options.glassStyle.rawValue, forKey: "interface.glassStyle")
+        defaults.set(options.safeGlassBackgroundTransparency, forKey: "interface.glassBackgroundTransparency")
         defaults.set(options.motion.rawValue, forKey: "interface.motion")
         defaults.set(options.accent.rawValue, forKey: "interface.accent")
         defaults.set(options.density.rawValue, forKey: "interface.density")
