@@ -72,9 +72,11 @@ final class InterfacePreferencesTests: XCTestCase {
 
     func testGlassFallsBackOnOldSystemsAndReduceTransparencyOverridesEveryStyle() {
         var options = InterfaceOptions()
-        options.surface = .liquid
-        XCTAssertEqual(options.effectiveSurface(nativeGlassAvailable: false, reduceTransparency: false), .frosted)
-        XCTAssertEqual(options.effectiveSurface(nativeGlassAvailable: true, reduceTransparency: false), .liquid)
+        for surface in InterfaceSurface.allCases {
+            options.surface = surface
+            XCTAssertEqual(options.effectiveSurface(nativeGlassAvailable: false, reduceTransparency: false), .frosted)
+            XCTAssertEqual(options.effectiveSurface(nativeGlassAvailable: true, reduceTransparency: false), .liquid)
+        }
         for surface in InterfaceSurface.allCases {
             options.surface = surface
             XCTAssertEqual(options.effectiveSurface(nativeGlassAvailable: true, reduceTransparency: true), .standard)

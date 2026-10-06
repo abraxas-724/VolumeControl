@@ -7,6 +7,7 @@ import SwiftUI
 final class MenuBarPopoverController: NSObject, NSPopoverDelegate {
     private let popover = NSPopover()
     private let hosting: NSHostingController<AnyView>
+    private let layout = PanelPresentationContext()
     private let preferences: InterfacePreferences
     private let beforeOpening: () -> Void
     private let reduceMotion: () -> Bool
@@ -17,6 +18,8 @@ final class MenuBarPopoverController: NSObject, NSPopoverDelegate {
     private let workspaceNotifications: NotificationCenter
     private var accessibilityObserver: NSObjectProtocol?
     private var muted = false
+    private var volume: Double? = 0.5
+    private var statusSymbolName: String?
 
     var isShown: Bool { popover.isShown }
     var animates: Bool { popover.animates }
@@ -27,7 +30,7 @@ final class MenuBarPopoverController: NSObject, NSPopoverDelegate {
          beforeOpening: @escaping () -> Void = {}, reduceMotion: (() -> Bool)? = nil,
          reduceTransparency: (() -> Bool)? = nil, workspaceNotifications: NotificationCenter? = nil) {
         self.preferences = preferences
-        hosting = NSHostingController(rootView: content)
+        hosting = NSHostingController(rootView: AnyView(PanelHostedContent(content: content, layout: layout)))
         self.beforeOpening = beforeOpening
         self.reduceMotion = reduceMotion ?? { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
         self.reduceTransparency = reduceTransparency ?? { NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency }
@@ -64,12 +67,21 @@ final class MenuBarPopoverController: NSObject, NSPopoverDelegate {
         item.button?.setAccessibilityLabel("VolumeControl 音量面板")
         item.button?.toolTip = "VolumeControl"
         statusItem = item
-        setMuted(muted)
+        updateStatusImage()
     }
 
-    func setMuted(_ muted: Bool) {
+    func setSystemAudio(volume: Double?, muted: Bool) {
+        self.volume = volume
         self.muted = muted
-        let image = NSImage(systemSymbolName: muted ? "speaker.slash.fill" : "speaker.wave.2.fill", accessibilityDescription: "VolumeControl")
+        updateStatusImage()
+    }
+
+    private func updateStatusImage() {
+        let symbol = MenuBarVolumeSymbol.name(volume: volume, muted: muted)
+        guard statusSymbolName != symbol || statusItem?.button?.image == nil else { return }
+        statusSymbolName = symbol
+        let image = NSImage(systemSymbolName: symbol,
+                            accessibilityDescription: "VolumeControl")
         image?.isTemplate = true
         statusItem?.button?.image = image
     }
@@ -125,24 +137,55 @@ final class MenuBarPopoverController: NSObject, NSPopoverDelegate {
         case .light: popover.appearance = NSAppearance(named: .aqua)
         case .dark: popover.appearance = NSAppearance(named: .darkAqua)
         }
+        hosting.view.window?.appearance = popover.appearance
+        hosting.view.appearance = popover.appearance
         let surface = options.effectiveSurface(nativeGlassAvailable: InterfaceAppearanceSupport.nativeGlassAvailable,
                                                reduceTransparency: reduceTransparency())
         hosting.view.window?.isOpaque = surface == .standard
         hosting.view.window?.backgroundColor = surface == .standard ? .windowBackgroundColor : .clear
-        if #available(macOS 26.0, *) {
-            // NSPopover 的外壳也会挡住内容；只使用公开玻璃类型和 style，不查找私有类或改动结构。
-            // 系统未提供这种外壳时保留原样，仍使用系统的锚定、关闭行为及展开动画。
-            for glass in hosting.view.superview?.subviews.compactMap({ $0 as? NSGlassEffectView }) ?? [] {
-                glass.style = surface == .liquid && options.glassStyle == .clear ? .clear : .regular
-            }
-        }
+        let transparency = reduceTransparency()
+        let motion = reduceMotion()
+        if layout.reduceTransparency != transparency { layout.reduceTransparency = transparency }
+        if layout.reduceMotion != motion { layout.reduceMotion = motion }
     }
 
     private func updateContentSize(anchor: NSView?) {
         let screen = anchor?.window?.screen ?? hosting.view.window?.screen ?? NSScreen.main
         let availableHeight = max(360, (screen?.visibleFrame.height ?? 900) - 36)
-        let size = hosting.sizeThatFits(in: NSSize(width: 480, height: availableHeight))
+        if layout.maximumHeight != availableHeight { layout.maximumHeight = availableHeight }
+        let size = hosting.sizeThatFits(in: NSSize(width: PanelStyle.width, height: availableHeight))
         hosting.view.setFrameSize(size)
         popover.contentSize = size
+    }
+}
+
+/// 可用屏幕尺寸单独发布，避免更换 SwiftUI 根节点而丢失搜索、焦点和展开状态。
+@MainActor
+private final class PanelPresentationContext: ObservableObject {
+    @Published var maximumHeight: CGFloat = 680
+    @Published var reduceTransparency = false
+    @Published var reduceMotion = false
+}
+
+private struct PanelHostedContent: View {
+    let content: AnyView
+    @ObservedObject var layout: PanelPresentationContext
+    var body: some View {
+        content.environment(\.panelMaximumHeight, layout.maximumHeight)
+            .environment(\.usesNativePopoverGlass, InterfaceAppearanceSupport.nativeGlassAvailable)
+            .environment(\.panelReduceTransparency, layout.reduceTransparency)
+            .environment(\.panelReduceMotion, layout.reduceMotion)
+    }
+}
+
+enum MenuBarVolumeSymbol {
+    static func name(volume: Double?, muted: Bool) -> String {
+        if muted { return "speaker.slash.fill" }
+        guard let volume, volume.isFinite else { return "speaker.wave.2.fill" }
+        let value = min(1, max(0, volume))
+        if value == 0 { return "speaker.slash.fill" }
+        if value <= 0.33 { return "speaker.wave.1.fill" }
+        if value <= 0.66 { return "speaker.wave.2.fill" }
+        return "speaker.wave.3.fill"
     }
 }

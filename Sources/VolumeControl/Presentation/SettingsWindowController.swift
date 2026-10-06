@@ -26,9 +26,10 @@ final class SettingsWindowController {
             let controller = NSHostingController(rootView: makeContent())
             let settings = NSWindow(contentViewController: controller)
             settings.title = "VolumeControl 设置"
-            settings.styleMask = [.titled, .closable, .miniaturizable]
+            settings.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             settings.isReleasedWhenClosed = false
-            settings.setContentSize(NSSize(width: 500, height: 660))
+            settings.setContentSize(NSSize(width: 720, height: 560))
+            settings.contentMinSize = NSSize(width: 680, height: 480)
             settings.center()
             window = settings
         }

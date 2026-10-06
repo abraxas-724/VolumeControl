@@ -8,9 +8,7 @@ struct HeadphoneSwitchSettings: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("耳机与输出", systemImage: "headphones").font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color.accentColor)
+        Section("耳机与输出") {
             Toggle("插入耳机自动切换", isOn: $model.deviceSwitchOptions.autoSwitchHeadphones)
             Picker("指定耳机", selection: Binding(get: { model.deviceSwitchOptions.preferredHeadphoneUID ?? "" },
                 set: { model.deviceSwitchOptions.preferredHeadphoneUID = $0.isEmpty ? nil : $0 })) {
@@ -27,6 +25,6 @@ struct HeadphoneSwitchSettings: View {
                 Text("高级路由测试期间暂停自动切换。")
                     .font(.caption).foregroundStyle(.secondary)
             }
-        }.toggleStyle(.switch).modifier(PanelCard())
+        }
     }
 }

@@ -287,3 +287,7 @@ USB 耳机的麦克风流仍可能出现在聚合设备的回调中，即使使�
 ## 2.0.0 发布同步（2026-10-06）
 
 当前功能作为 GitHub 非预发布 Release 交付，通用 DMG/ZIP 含完整应用包和 ad-hoc 签名。构建脚本校验包版本与发行版本一致；设置从 Info.plist 读取版本。Developer ID、公证及新机器安装验收尚未完成，不将 GitHub 正式 Release 等同于 P5 完成。验证、安装及限制见 [发布说明](docs/RELEASE_2.0.0.md)。
+
+## macOS 原生表现层精修
+
+表现层采用单层系统 Popover 背景、430pt 分区面板、LazyVStack 混音器和 NavigationSplitView 设置窗口。音频模型/引擎接口不变；现有音量状态仅增加菜单栏符号订阅。旧材质字段保持存储兼容，实际材质自动选择，强调色新增系统值。实测固定控件高度约束滚动列表，系统无障碍通知同时驱动 AppKit 外壳与 SwiftUI 内容。详细文件范围、动效与验收见 [精修记录](docs/NATIVE_UI_REFINEMENT.md)。

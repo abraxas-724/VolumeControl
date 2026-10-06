@@ -31,7 +31,10 @@ final class VolumeControlApplicationDelegate: NSObject, NSApplicationDelegate {
             })
         ), beforeOpening: { model.refresh() })
         self.panel = panel
-        model.$isMuted.sink { [weak panel] muted in panel?.setMuted(muted) }.store(in: &subscriptions)
+        Publishers.CombineLatest3(model.$systemVolume, model.$isMuted, model.$canAdjustSystemVolume)
+            .sink { [weak panel] volume, muted, available in
+                panel?.setSystemAudio(volume: available ? volume : nil, muted: muted)
+            }.store(in: &subscriptions)
         model.objectWillChange.sink { [weak panel] in panel?.scheduleResize() }.store(in: &subscriptions)
         panel.start()
         if arguments.contains("--verify-process-audio") {
