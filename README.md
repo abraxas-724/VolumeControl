@@ -94,3 +94,5 @@ sh scripts/verify-audio-routing.sh
 ## UI 与功能方向
 
 2026-10-06 完成第一版 UI 美化与搜索/筛选。参考 FineTune、BackgroundMusic、MonitorControl 和 eqMac，项目对比、源码入口、功能优先级与验证范围见 [UI 调研与实现记录](docs/UI_RESEARCH.md)。
+
+设置入口和面板留白已修复：齿轮按钮显式打开并置前设置窗口，关闭后可再次打开；面板按内容高度布局。验证及限制见 [设置与布局修复](docs/SETTINGS_PANEL_FIX.md)。

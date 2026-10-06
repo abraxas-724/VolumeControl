@@ -50,6 +50,7 @@ struct SettingsView: View {
             LabeledContent("版本", value: "2.0.0-beta.3")
         }
         .padding(20)
-        .frame(width: 360)
+        .frame(width: 360, height: 220, alignment: .topLeading)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 }

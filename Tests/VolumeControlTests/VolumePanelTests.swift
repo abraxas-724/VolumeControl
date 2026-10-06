@@ -15,19 +15,24 @@ final class VolumePanelTests: XCTestCase {
         let model = VolumeControlModel(audio: audio, applicationProvider: FakeApplicationProvider(values: applications), audioRouter: ModelRoutingStub(), monitorDevices: false, inputPermission: ModelPermissionStub(), appAudio: control)
         await model.enableAppVolume(id: "test.0:100")
         model.setAppVolume(id: "test.0:100", volume: 0.4)
-        let host = NSHostingView(rootView: VolumePanel(model: model))
+        let host = NSHostingView(rootView: VolumePanel(model: model, openSettings: {}))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 700), styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentView = host
         host.layoutSubtreeIfNeeded()
         let size = host.fittingSize
         XCTAssertGreaterThanOrEqual(size.height, 570, "列表不能收缩到仅容纳一个应用")
+        let sizing = NSHostingController(rootView: VolumePanel(model: model, openSettings: {}))
+        let normal = sizing.sizeThatFits(in: NSSize(width: 480, height: 760))
+        let oversized = sizing.sizeThatFits(in: NSSize(width: 480, height: 1100))
+        XCTAssertEqual(normal.height, oversized.height, accuracy: 1, "面板不能拉伸成上下空白")
+        XCTAssertEqual(normal.width, 480, accuracy: 1)
         audio.volume = 0.7
         model.refresh()
         try await Task.sleep(nanoseconds: 50_000_000)
         XCTAssertEqual(audio.volumeWrites, 0, "刷新系统音量不能触发 UI 反向写入")
         if let path = ProcessInfo.processInfo.environment["VOLUMECONTROL_PANEL_SNAPSHOT"] {
             func capture(_ destination: String, scheme: ColorScheme) throws {
-                let preview = NSHostingView(rootView: VolumePanel(model: model).environment(\.colorScheme, scheme))
+                let preview = NSHostingView(rootView: VolumePanel(model: model, openSettings: {}).environment(\.colorScheme, scheme))
                 preview.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
                 window.contentView = preview
                 preview.setFrameSize(preview.fittingSize)

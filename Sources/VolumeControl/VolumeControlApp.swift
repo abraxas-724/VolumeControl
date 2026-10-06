@@ -4,6 +4,7 @@ import SwiftUI
 @main
 struct VolumeControlApp: App {
     @StateObject private var model = VolumeControlModel(restoreRememberedAudio: !CommandLine.arguments.contains { $0.hasPrefix("--verify-") })
+    @State private var settingsWindow = SettingsWindowController()
 
     init() {
         if CommandLine.arguments.contains("--verify-process-audio") {
@@ -22,15 +23,12 @@ struct VolumeControlApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            VolumePanel(model: model)
+            VolumePanel(model: model, openSettings: { settingsWindow.showSettings() })
         } label: {
             Image(systemName: model.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
                 .accessibilityLabel("VolumeControl")
         }
         .menuBarExtraStyle(.window)
 
-        Settings {
-            SettingsView()
-        }
     }
 }

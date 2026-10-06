@@ -2,6 +2,7 @@ import SwiftUI
 
 struct VolumePanel: View {
     @ObservedObject var model: VolumeControlModel
+    let openSettings: () -> Void
     @AppStorage("showPercentage") private var showPercentage = true
     @State private var showInstallSheet = false
     @State private var searchText = ""
@@ -20,8 +21,10 @@ struct VolumePanel: View {
             advancedSection
             footer
         }
-        .padding(18)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
         .frame(width: 480)
+        .fixedSize(horizontal: false, vertical: true)
         .background(Color(nsColor: .windowBackgroundColor))
         .tint(PanelStyle.accent)
         .sheet(isPresented: $showInstallSheet) {
@@ -197,7 +200,7 @@ struct VolumePanel: View {
                         .accessibilityLabel("停止所有应用音量控制")
                         .help("停止所有应用控制并关闭自动恢复")
                 }
-                SettingsLink { Image(systemName: "gearshape") }
+                Button(action: openSettings) { Image(systemName: "gearshape") }
                     .buttonStyle(PanelIconButtonStyle()).accessibilityLabel("设置").help("设置")
             }
         }
