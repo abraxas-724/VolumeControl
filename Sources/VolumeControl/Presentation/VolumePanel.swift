@@ -34,7 +34,7 @@ struct VolumePanel: View {
         .padding(.vertical, 10)
         .frame(width: 480)
         .fixedSize(horizontal: false, vertical: true)
-        .background(InterfaceBackdrop())
+        .background(PanelBackdrop())
         .animation(options.animation(reduceMotion: reduceMotion), value: filter)
         .onAppear {
             filter = options.defaultToEnabledApps ? .enabled : .all

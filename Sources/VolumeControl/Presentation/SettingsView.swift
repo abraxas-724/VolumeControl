@@ -79,9 +79,10 @@ struct SettingsView: View {
                 }.pickerStyle(.segmented).labelsHidden()
                 if preferences.options.surface == .liquid {
                     if #available(macOS 26.0, *) {
-                        caption("原生液态玻璃用于按钮与切换控件，正文保持清晰。")
+                        caption("原生液态玻璃用于主页面背景、按钮与切换控件，正文卡片保持清晰。")
                     } else { caption("原生液态玻璃需要 macOS 26+；当前使用磨砂玻璃。") }
                 }
+                if preferences.options.surface == .frosted { caption("主页面背景使用窗口后方的磨砂材质，正文卡片保持清晰。") }
                 if reduceTransparency { caption("系统已开启减少透明度，当前使用实色界面。") }
             }
             section("强调色", symbol: "paintpalette.fill") {

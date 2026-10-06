@@ -20,8 +20,8 @@ final class PanelVisibilityTests: XCTestCase {
             try await Task.sleep(nanoseconds: 80_000_000)
             host.setFrameSize(host.fittingSize)
             host.layoutSubtreeIfNeeded()
-            // 原生玻璃由窗口合成器绘制；验证切换回来后仍可见，玻璃本身用真窗口截图验收。
-            if surface == .liquid { continue }
+            // 透明背景由窗口合成器绘制；验证切回经典后仍可见，玻璃本身用真窗口截图验收。
+            if surface != .standard { continue }
             let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
             host.cacheDisplay(in: host.bounds, to: bitmap)
             let alpha = try XCTUnwrap(bitmap.colorAt(x: bitmap.pixelsWide / 2, y: 4)).alphaComponent

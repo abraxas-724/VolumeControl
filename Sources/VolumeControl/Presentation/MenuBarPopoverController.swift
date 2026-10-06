@@ -10,6 +10,7 @@ final class MenuBarPopoverController: NSObject, NSPopoverDelegate {
     private let preferences: InterfacePreferences
     private let beforeOpening: () -> Void
     private let reduceMotion: () -> Bool
+    private let reduceTransparency: () -> Bool
     private var statusItem: NSStatusItem?
     private var preferencesSubscription: AnyCancellable?
     private var resizeTask: Task<Void, Never>?
@@ -23,11 +24,13 @@ final class MenuBarPopoverController: NSObject, NSPopoverDelegate {
     var statusButton: NSStatusBarButton? { statusItem?.button }
 
     init(preferences: InterfacePreferences, content: AnyView,
-         beforeOpening: @escaping () -> Void = {}, reduceMotion: (() -> Bool)? = nil) {
+         beforeOpening: @escaping () -> Void = {}, reduceMotion: (() -> Bool)? = nil,
+         reduceTransparency: (() -> Bool)? = nil) {
         self.preferences = preferences
         hosting = NSHostingController(rootView: content)
         self.beforeOpening = beforeOpening
         self.reduceMotion = reduceMotion ?? { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+        self.reduceTransparency = reduceTransparency ?? { NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency }
         super.init()
         hosting.sizingOptions = [.preferredContentSize]
         popover.contentViewController = hosting
@@ -81,6 +84,7 @@ final class MenuBarPopoverController: NSObject, NSPopoverDelegate {
         apply(preferences.options)
         updateContentSize(anchor: anchor)
         popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
+        apply(preferences.options)
         // 菜单栏应用不必激活其他窗口；让搜索框能接收键盘输入。
         hosting.view.window?.makeKey()
         scheduleResize()
@@ -120,6 +124,10 @@ final class MenuBarPopoverController: NSObject, NSPopoverDelegate {
         case .light: popover.appearance = NSAppearance(named: .aqua)
         case .dark: popover.appearance = NSAppearance(named: .darkAqua)
         }
+        let surface = options.effectiveSurface(nativeGlassAvailable: InterfaceAppearanceSupport.nativeGlassAvailable,
+                                               reduceTransparency: reduceTransparency())
+        hosting.view.window?.isOpaque = surface == .standard
+        hosting.view.window?.backgroundColor = surface == .standard ? .windowBackgroundColor : .clear
     }
 
     private func updateContentSize(anchor: NSView?) {

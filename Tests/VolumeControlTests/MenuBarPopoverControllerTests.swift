@@ -45,6 +45,35 @@ final class MenuBarPopoverControllerTests: XCTestCase {
         }
     }
 
+    func testGlassBackgroundTransitionsPreserveWindowAndRespectReducedTransparency() {
+        let preferences = InterfacePreferences(storage: MemoryInterfacePreferences())
+        preferences.options.motion = .off
+        var reducedTransparency = false
+        let controller = MenuBarPopoverController(preferences: preferences,
+            content: AnyView(Text("Readable content").frame(width: 480, height: 200)),
+            reduceTransparency: { reducedTransparency })
+        let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 40, height: 40),
+            styleMask: [.borderless], backing: .buffered, defer: false)
+        let anchor = NSView(frame: NSRect(x: 0, y: 0, width: 40, height: 40))
+        window.contentView = anchor
+        window.orderFront(nil)
+        defer { controller.stop(); window.orderOut(nil); window.contentView = nil }
+        controller.toggle(relativeTo: anchor)
+        let first = controller.presentationWindow
+        XCTAssertTrue(first?.isOpaque == true)
+        for surface in [InterfaceSurface.liquid, .frosted, .liquid, .standard] {
+            preferences.options.surface = surface
+            XCTAssertTrue(controller.isShown)
+            XCTAssertTrue(controller.presentationWindow === first)
+            XCTAssertEqual(first?.isOpaque, surface == .standard)
+        }
+        preferences.options.surface = .liquid
+        reducedTransparency = true
+        preferences.options.accent = .teal
+        XCTAssertTrue(first?.isOpaque == true)
+        XCTAssertEqual(first?.backgroundColor, NSColor.windowBackgroundColor)
+    }
+
     /// 显式启用的真窗口验收：点击本测试拥有的状态栏按钮，不修改真实音频或用户偏好。
     func testNativeStatusItemGlassTransitionsAndReopening() async throws {
         guard let directory = ProcessInfo.processInfo.environment["VOLUMECONTROL_POPOVER_SNAPSHOT"] else {
@@ -75,6 +104,16 @@ final class MenuBarPopoverControllerTests: XCTestCase {
         button.performClick(nil)
         try await waitForVisibility(true)
         try await Task.sleep(nanoseconds: 350_000_000)
+        // 用自己的彩色窗口检验背景采样，截图不依赖桌面壁纸和其他应用内容。
+        let panelWindow = try XCTUnwrap(controller.presentationWindow)
+        let backdrop = NSWindow(contentRect: panelWindow.frame.insetBy(dx: -30, dy: -30),
+            styleMask: [.borderless], backing: .buffered, defer: false)
+        backdrop.contentView = NSHostingView(rootView: HStack(spacing: 0) { Color.red; Color.green; Color.blue })
+        backdrop.level = panelWindow.level
+        backdrop.orderFrontRegardless()
+        backdrop.order(.below, relativeTo: panelWindow.windowNumber)
+        XCTAssertTrue(backdrop.isVisible)
+        defer { backdrop.orderOut(nil); backdrop.contentView = nil }
         for (index, surface) in [InterfaceSurface.standard, .liquid, .frosted, .liquid, .standard].enumerated() {
             preferences.options.surface = surface
             preferences.options.theme = index.isMultiple(of: 2) ? .light : .dark
@@ -89,6 +128,17 @@ final class MenuBarPopoverControllerTests: XCTestCase {
             capture.waitUntilExit()
             XCTAssertEqual(capture.terminationStatus, 0)
             XCTAssertNotNil(NSImage(contentsOfFile: path))
+            if surface == .liquid || surface == .frosted {
+                let screenTop = NSScreen.screens.first?.frame.maxY ?? 0
+                let rect = window.frame
+                let compositeCapture = Process()
+                compositeCapture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+                compositeCapture.arguments = ["-x", "-R", "\(Int(rect.minX)),\(Int(screenTop - rect.maxY)),\(Int(rect.width)),\(Int(rect.height))",
+                    "\(directory)/\(index)-\(surface.rawValue)-composite.png"]
+                try compositeCapture.run()
+                compositeCapture.waitUntilExit()
+                XCTAssertEqual(compositeCapture.terminationStatus, 0)
+            }
         }
         for _ in 0..<3 {
             button.performClick(nil)
