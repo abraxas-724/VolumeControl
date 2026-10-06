@@ -44,7 +44,7 @@ struct InterfaceAppearance: ViewModifier {
     }
 }
 
-/// 液态玻璃只用于交互控件，正文保持稳定的内容层；旧系统使用系统磨砂材质。
+/// 主背景和交互控件使用原生玻璃，正文保持稳定内容层；旧系统使用系统磨砂材质。
 enum InterfaceAppearanceSupport {
     static var nativeGlassAvailable: Bool {
         if #available(macOS 26.0, *) { return true }

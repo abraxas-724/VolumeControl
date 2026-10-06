@@ -79,7 +79,7 @@ struct SettingsView: View {
                 }.pickerStyle(.segmented).labelsHidden()
                 if preferences.options.surface == .liquid {
                     if #available(macOS 26.0, *) {
-                        caption("原生液态玻璃用于主页面背景、按钮与切换控件，正文卡片保持清晰。")
+                        caption("使用苹果原生自适应液态玻璃，玻璃外观由系统管理。颜色模式选“跟随系统”可同步浅色与深色。")
                     } else { caption("原生液态玻璃需要 macOS 26+；当前使用磨砂玻璃。") }
                 }
                 if preferences.options.surface == .frosted { caption("主页面背景使用窗口后方的磨砂材质，正文卡片保持清晰。") }

@@ -5,7 +5,6 @@ import SwiftUI
 struct PanelBackdrop: View {
     @Environment(\.interfaceOptions) private var options
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         let surface = options.effectiveSurface(nativeGlassAvailable: InterfaceAppearanceSupport.nativeGlassAvailable,
@@ -18,15 +17,12 @@ struct PanelBackdrop: View {
                 WindowFrostedBackdrop()
             case .liquid:
                 if #available(macOS 26.0, *) {
-                    Color.clear.glassEffect(.clear.tint(options.accent.color.opacity(0.06)),
+                    // regular 由系统管理自适应对比度与玻璃外观；clear 会固定为清透材质。
+                    Color.clear.glassEffect(.regular,
                         in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 } else { WindowFrostedBackdrop() }
             }
-            if surface == .liquid {
-                // 保留光学边缘与背景采样，同时使正文在鲜艳壁纸前保持对比度。
-                (colorScheme == .dark ? Color.black : Color.white).opacity(colorScheme == .dark ? 0.18 : 0.12)
-            }
-            if surface != .standard {
+            if surface == .frosted {
                 LinearGradient(colors: [options.accent.color.opacity(0.06), .clear, options.accent.color.opacity(0.025)],
                                startPoint: .topLeading, endPoint: .bottomTrailing)
             }

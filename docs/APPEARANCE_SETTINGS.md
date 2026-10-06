@@ -9,7 +9,7 @@
 “外观与动效”页：
 
 - 颜色模式：跟随系统、浅色、深色；设置窗口标题栏同步切换。
-- 界面材质：经典、磨砂玻璃、液态玻璃。后两者同时用于主页面背景和交互控件：磨砂提供窗口后方的模糊与色彩透出，液态玻璃提供更清透的背景与光学边缘。
+- 界面材质：经典、磨砂玻璃、液态玻璃。后两者同时用于主页面背景和交互控件：磨砂提供窗口后方的模糊与色彩透出；液态玻璃使用苹果原生自适应材质，玻璃外观由系统管理。
 - 强调色：靛蓝、海蓝、青色、薄荷、暖橙、樱粉。
 - 面板展开动效：关闭、系统展开。点击状态栏声音图标，从图标处打开/收起整个原生弹出窗口；动效由 `NSPopover.animates` 控制，时序由系统决定。旧“灵动”偏好迁移为系统展开，不使用悬停缩放或静音图标弹跳来代替窗口动效。数字及筛选保留轻微状态过渡。
 - 密度：舒适保留 320 点列表，紧凑使用 260 点列表及更小行间距。
@@ -30,7 +30,9 @@
 
 原生 `glassEffect`、`GlassEffectContainer` 使用 macOS 26+ 可用性保护，工程最低版本仍为 macOS 14。较早系统选择液态玻璃时使用系统磨砂材质，并显示兼容说明；不声称该回退等同于原生 Liquid Glass。
 
-主页面背景由独立 `PanelBackdrop` 绘制：经典使用实色，磨砂使用 `NSVisualEffectView` 的 [behindWindow 模式](https://developer.apple.com/documentation/appkit/nsvisualeffectview/blendingmode-swift.enum/behindwindow)，液态玻璃使用原生 `glassEffect(.clear)`、轻微强调色和随颜色模式调整的可读性遮罩。后两者同步将弹出窗口设为非不透明/clear 背景，实际桌面及窗口内容能透过并形成模糊或折射；不是不透明底色上的渐变。正文卡片仍使用稳定的内容材质。
+主页面背景由独立 `PanelBackdrop` 绘制：经典使用实色，磨砂使用 `NSVisualEffectView` 的 [behindWindow 模式](https://developer.apple.com/documentation/appkit/nsvisualeffectview/blendingmode-swift.enum/behindwindow)，液态玻璃使用原生 `glassEffect(.regular)`。玻璃背景不叠加固定透明遮罩、强调色 tint 或渐变，让系统决定背景采样、亮度与对比度；强调色仍用于控件。后两者同步将弹出窗口设为非不透明/clear 背景，实际桌面及窗口内容能透过并形成模糊或折射。正文卡片仍使用稳定的内容材质。
+
+选“液态玻璃”即可使用系统材质；希望同步系统浅色/深色时，再将颜色模式选为“跟随系统”。玻璃效果会由原生框架响应系统支持的 Liquid Glass 外观设置与辅助功能，无需应用另存透明度滑块。根据 [Apple 材质指南](https://developer.apple.com/design/human-interface-guidelines/materials)，原生材质外观会随用户选择的系统玻璃外观变化；`regular` 具有自适应可读性，原来的 `clear` 更适合媒体背景。两者区别见 [Meet Liquid Glass](https://developer.apple.com/videos/play/wwdc2025/219/)。具体系统选项以所用 macOS 版本为准，入口为“系统设置 → 外观”。
 
 整个面板不放入条件切换的玻璃容器，仅替换背景，正文的视图身份与交互状态保持。背景不启用整页按压形变，也不接收点击或 VoiceOver 焦点。按钮及切换控件保留玻璃效果，设置预览中的同组玻璃控件由局部容器统一合成。设计依据 [Apple 自定义 Liquid Glass 指南](https://developer.apple.com/documentation/swiftui/applying-liquid-glass-to-custom-views)，API 的系统版本以本地 Xcode SDK 声明复核。
 
@@ -48,7 +50,7 @@
 
 ## 验证
 
-- `swift test`：148 项、25 项按条件跳过、0 失败。额外启用只读设备核验与真实状态栏/设置截图验收均通过。Release 打包及本地签名检查通过。
+- `swift test`：149 项、25 项按条件跳过、0 失败。本轮额外启用真实状态栏截图验收通过，Release 打包及本地签名检查通过；前一轮只读设备核验与设置截图记录保留。
 - 偏好测试覆盖加载不写入、选项重载、仅重置界面、无变化不重复写入、旧系统玻璃回退、减少透明度/动效策略及旧动效迁移。
 - 扩展窗口测试：首次打开、重复打开、关闭后重新打开及浅色/深色/跟随系统标题栏切换。
 - 扩展面板测试：大小提议不拉伸、紧凑布局更小、改变外观及筛选不会写系统音量或设备状态。
@@ -56,8 +58,9 @@
 - 普通 NSHostingView 缓存不能完整保存原生玻璃合成层；独立窗口截图也可能只保存透明窗口本身，丢失最终背景合成色。需要验证背景时，截图测试面板所在屏幕矩形（`screencapture -R`），由测试创建的红/绿/蓝背景窗口提供采样源，避免依赖桌面或其他应用内容。测试仍输出 `-l` 窗口图作对照。要求屏幕录制权限，不是普通测试依赖。
 - 新增材质连续切换回归测试；修复前切换液态玻璃后，经典与磨砂模式仍整页透明，修复后通过。
 - 新增原生弹出控制器测试：关闭动效、减少动态效果策略，重复打开/关闭，关闭不触发音频刷新。
-- 可选真状态栏验收：`VOLUMECONTROL_POPOVER_SNAPSHOT="$PWD/.build/ui-review/headphone-background" swift test --filter MenuBarPopoverControllerTests.testNativeStatusItemGlassTransitionsAndReopening`。测试点击自己创建的真实状态栏按钮，连续切换经典/液态/磨砂/液态/经典和浅深主题，截图并重复开关 3 次。背景只替换自身图层，正文始终完整可见；检查液态玻璃光学边缘、磨砂模糊、背景色透出和卡片文字可读性。使用内存偏好和音频替身，不需要辅助功能权限；截图需要屏幕录制权限。
+- 可选真状态栏验收：`VOLUMECONTROL_POPOVER_SNAPSHOT="$PWD/.build/ui-review/system-liquid-glass" swift test --filter MenuBarPopoverControllerTests.testNativeStatusItemGlassTransitionsAndReopening`。测试点击自己创建的真实状态栏按钮，连续切换经典/浅色液态/浅色磨砂/深色液态/深色经典；再在中性背景下选择跟随系统的液态玻璃，截图并重复开关 3 次。背景只替换自身图层，正文始终完整可见；检查液态玻璃光学边缘、磨砂模糊、背景色透出和卡片文字可读性。使用内存偏好和音频替身，不需要辅助功能权限；截图需要屏幕录制权限。
 - 新增窗口背景回归测试：材质切换不会替换窗口或隐藏内容，“减少透明度”恢复实色和不透明窗口。
+- 新增系统通知测试：用独立 NotificationCenter 和只读能力替身模拟“减少透明度”连续开关；已打开窗口即时更新底色与不透明状态，不重建窗口、不修改外观偏好。系统 Liquid Glass 外观联动由原生框架负责，本轮没有改变用户的系统玻璃设置来实测透明度滑块。
 - Release 构建、ad-hoc 签名、`git diff --check` 通过。
 
 截图与临时产物保存在被忽略的 `.build/`。没有切换实际音频设备、调节真实系统音量或修改登录项来做测试。已通过应用自己拥有的 AppKit 按钮调用验证状态栏开关；外部鼠标自动化与 VoiceOver 仍受当前辅助功能权限限制。macOS 14 上的视觉回退与长时间 GPU/CPU 性能仍需对应环境验收，未宣称实测完成。

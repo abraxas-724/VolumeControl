@@ -74,6 +74,35 @@ final class MenuBarPopoverControllerTests: XCTestCase {
         XCTAssertEqual(first?.backgroundColor, NSColor.windowBackgroundColor)
     }
 
+    func testAccessibilityNotificationUpdatesOpenGlassWithoutChangingPreferences() {
+        let preferences = InterfacePreferences(storage: MemoryInterfacePreferences())
+        preferences.options.surface = .liquid
+        preferences.options.motion = .off
+        let originalOptions = preferences.options
+        let notifications = NotificationCenter()
+        var reducedTransparency = false
+        let controller = MenuBarPopoverController(preferences: preferences,
+            content: AnyView(Text("Readable content").frame(width: 480, height: 200)),
+            reduceTransparency: { reducedTransparency }, workspaceNotifications: notifications)
+        let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 40, height: 40),
+            styleMask: [.borderless], backing: .buffered, defer: false)
+        let anchor = NSView(frame: NSRect(x: 0, y: 0, width: 40, height: 40))
+        window.contentView = anchor
+        window.orderFront(nil)
+        defer { controller.stop(); window.orderOut(nil); window.contentView = nil }
+        controller.toggle(relativeTo: anchor)
+        let first = controller.presentationWindow
+        for reduced in [true, false, true, false] {
+            reducedTransparency = reduced
+            notifications.post(name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
+            XCTAssertTrue(controller.isShown)
+            XCTAssertTrue(controller.presentationWindow === first)
+            XCTAssertEqual(first?.isOpaque, reduced)
+            XCTAssertEqual(first?.backgroundColor, reduced ? NSColor.windowBackgroundColor : NSColor.clear)
+            XCTAssertEqual(preferences.options, originalOptions)
+        }
+    }
+
     /// 显式启用的真窗口验收：点击本测试拥有的状态栏按钮，不修改真实音频或用户偏好。
     func testNativeStatusItemGlassTransitionsAndReopening() async throws {
         guard let directory = ProcessInfo.processInfo.environment["VOLUMECONTROL_POPOVER_SNAPSHOT"] else {
@@ -108,15 +137,30 @@ final class MenuBarPopoverControllerTests: XCTestCase {
         let panelWindow = try XCTUnwrap(controller.presentationWindow)
         let backdrop = NSWindow(contentRect: panelWindow.frame.insetBy(dx: -30, dy: -30),
             styleMask: [.borderless], backing: .buffered, defer: false)
-        backdrop.contentView = NSHostingView(rootView: HStack(spacing: 0) { Color.red; Color.green; Color.blue })
+        let backdropView = NSHostingView(rootView: AnyView(HStack(spacing: 0) { Color.red; Color.green; Color.blue }))
+        backdrop.contentView = backdropView
         backdrop.level = panelWindow.level
         backdrop.orderFrontRegardless()
         backdrop.order(.below, relativeTo: panelWindow.windowNumber)
         XCTAssertTrue(backdrop.isVisible)
         defer { backdrop.orderOut(nil); backdrop.contentView = nil }
-        for (index, surface) in [InterfaceSurface.standard, .liquid, .frosted, .liquid, .standard].enumerated() {
+        func captureComposite(_ window: NSWindow, name: String) throws {
+            let screenTop = NSScreen.screens.first?.frame.maxY ?? 0
+            let rect = window.frame
+            let capture = Process()
+            capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+            let path = "\(directory)/\(name)-composite.png"
+            capture.arguments = ["-x", "-R", "\(Int(rect.minX)),\(Int(screenTop - rect.maxY)),\(Int(rect.width)),\(Int(rect.height))", path]
+            try capture.run()
+            capture.waitUntilExit()
+            XCTAssertEqual(capture.terminationStatus, 0)
+            XCTAssertNotNil(NSImage(contentsOfFile: path))
+        }
+        let appearances: [(InterfaceSurface, InterfaceTheme)] = [(.standard, .light), (.liquid, .light),
+            (.frosted, .light), (.liquid, .dark), (.standard, .dark)]
+        for (index, (surface, theme)) in appearances.enumerated() {
             preferences.options.surface = surface
-            preferences.options.theme = index.isMultiple(of: 2) ? .light : .dark
+            preferences.options.theme = theme
             try await Task.sleep(nanoseconds: 250_000_000)
             XCTAssertTrue(controller.isShown)
             let window = try XCTUnwrap(controller.presentationWindow)
@@ -129,17 +173,18 @@ final class MenuBarPopoverControllerTests: XCTestCase {
             XCTAssertEqual(capture.terminationStatus, 0)
             XCTAssertNotNil(NSImage(contentsOfFile: path))
             if surface == .liquid || surface == .frosted {
-                let screenTop = NSScreen.screens.first?.frame.maxY ?? 0
-                let rect = window.frame
-                let compositeCapture = Process()
-                compositeCapture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-                compositeCapture.arguments = ["-x", "-R", "\(Int(rect.minX)),\(Int(screenTop - rect.maxY)),\(Int(rect.width)),\(Int(rect.height))",
-                    "\(directory)/\(index)-\(surface.rawValue)-composite.png"]
-                try compositeCapture.run()
-                compositeCapture.waitUntilExit()
-                XCTAssertEqual(compositeCapture.terminationStatus, 0)
+                try captureComposite(window, name: "\(index)-\(surface.rawValue)")
             }
         }
+        // 与控制中心参考图类似的中性背景；颜色模式由本机系统提供。
+        backdropView.rootView = AnyView(LinearGradient(colors: [.white, .gray],
+            startPoint: .topLeading, endPoint: .bottomTrailing))
+        preferences.options.theme = .system
+        preferences.options.surface = .liquid
+        try await Task.sleep(nanoseconds: 250_000_000)
+        XCTAssertTrue(controller.isShown)
+        XCTAssertNil(controller.presentationWindow?.appearance)
+        try captureComposite(try XCTUnwrap(controller.presentationWindow), name: "system-liquid")
         for _ in 0..<3 {
             button.performClick(nil)
             try await waitForVisibility(false)

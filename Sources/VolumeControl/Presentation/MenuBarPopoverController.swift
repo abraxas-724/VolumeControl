@@ -14,7 +14,7 @@ final class MenuBarPopoverController: NSObject, NSPopoverDelegate {
     private var statusItem: NSStatusItem?
     private var preferencesSubscription: AnyCancellable?
     private var resizeTask: Task<Void, Never>?
-    private let workspaceNotifications = NSWorkspace.shared.notificationCenter
+    private let workspaceNotifications: NotificationCenter
     private var accessibilityObserver: NSObjectProtocol?
     private var muted = false
 
@@ -25,12 +25,13 @@ final class MenuBarPopoverController: NSObject, NSPopoverDelegate {
 
     init(preferences: InterfacePreferences, content: AnyView,
          beforeOpening: @escaping () -> Void = {}, reduceMotion: (() -> Bool)? = nil,
-         reduceTransparency: (() -> Bool)? = nil) {
+         reduceTransparency: (() -> Bool)? = nil, workspaceNotifications: NotificationCenter? = nil) {
         self.preferences = preferences
         hosting = NSHostingController(rootView: content)
         self.beforeOpening = beforeOpening
         self.reduceMotion = reduceMotion ?? { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
         self.reduceTransparency = reduceTransparency ?? { NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency }
+        self.workspaceNotifications = workspaceNotifications ?? NSWorkspace.shared.notificationCenter
         super.init()
         hosting.sizingOptions = [.preferredContentSize]
         popover.contentViewController = hosting
@@ -40,7 +41,7 @@ final class MenuBarPopoverController: NSObject, NSPopoverDelegate {
             self?.apply(options)
             self?.scheduleResize()
         }
-        accessibilityObserver = workspaceNotifications.addObserver(
+        accessibilityObserver = self.workspaceNotifications.addObserver(
             forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
