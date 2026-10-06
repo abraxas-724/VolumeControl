@@ -16,19 +16,31 @@ jobs:
       - uses: actions/checkout@v4
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_26.6.app
+      - name: Determine release version
+        id: version
+        run: |
+          VERSION="$(cat VERSION)"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match VERSION $VERSION" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Run tests
         run: swift test
       - name: Build universal release packages
-        run: sh scripts/build-dmg.sh 2.0.0
+        run: sh scripts/build-dmg.sh "${{ steps.version.outputs.version }}"
       - name: Verify packages
         run: |
           codesign --verify --deep --strict VolumeControl.app
-          hdiutil verify dist/VolumeControl-2.0.0-universal.dmg
+          hdiutil verify "dist/VolumeControl-${{ steps.version.outputs.version }}-universal.dmg"
           cd dist
           shasum -a 256 -c SHA256SUMS.txt
       # 发布由 gh release create 显式完成，CI 不覆盖已经验收的下载资产。
       - uses: actions/upload-artifact@v4
         with:
           name: VolumeControl-universal-release
-          path: dist/*
+          path: |
+            dist/VolumeControl-*-universal.dmg
+            dist/VolumeControl-*-universal.zip
+            dist/SHA256SUMS.txt
           if-no-files-found: error

@@ -1,28 +1,26 @@
 import AppKit
 import SwiftUI
 
-/// 材质只替换背景层，面板正文及其交互状态保持同一视图身份。
+/// 原生 Popover 自带玻璃外壳，正文保持透明；独立预览才需要自己的背景。
 struct PanelBackdrop: View {
-    @Environment(\.interfaceOptions) private var options
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.accessibilityReduceTransparency) private var systemReduceTransparency
+    @Environment(\.panelReduceTransparency) private var panelReduceTransparency
+    private var reduceTransparency: Bool { panelReduceTransparency ?? systemReduceTransparency }
+    @Environment(\.usesNativePopoverGlass) private var usesNativePopoverGlass
+    @Environment(\.colorScheme) private var colorScheme
 
-    var body: some View {
-        let surface = options.effectiveSurface(nativeGlassAvailable: InterfaceAppearanceSupport.nativeGlassAvailable,
-                                               reduceTransparency: reduceTransparency)
-        ZStack {
-            switch surface {
-            case .standard:
+    @ViewBuilder var body: some View {
+        Group {
+            if reduceTransparency {
                 Color(nsColor: .windowBackgroundColor)
-            case .frosted:
+            } else if #available(macOS 26.0, *) {
+                if usesNativePopoverGlass {
+                    // 明亮桌面可透入 AppKit 玻璃；深色正文用系统底色保证 secondary 文本对比。
+                    Color(nsColor: .windowBackgroundColor).opacity(colorScheme == .dark ? 0.86 : 0)
+                }
+                else { Color.clear.glassEffect(.regular, in: Rectangle()) }
+            } else {
                 WindowFrostedBackdrop()
-            case .liquid:
-                // 分区玻璃由实际卡片承载；底层只采样窗口后方，避免大玻璃覆盖小玻璃。
-                WindowFrostedBackdrop(material: .underWindowBackground,
-                                      opacity: options.glassBackgroundOpacity)
-            }
-            if surface == .frosted {
-                LinearGradient(colors: [options.accent.color.opacity(0.06), .clear, options.accent.color.opacity(0.025)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
             }
         }
         .allowsHitTesting(false)
@@ -30,11 +28,9 @@ struct PanelBackdrop: View {
     }
 }
 
-/// behindWindow 采样窗口后面的桌面/应用；不能用不透明底色遮住该材质。
+/// behindWindow 采样窗口后的桌面，避免叠加不透明底色遮挡系统材质。
 struct WindowFrostedBackdrop: NSViewRepresentable {
     @Environment(\.colorScheme) private var colorScheme
-    var material: NSVisualEffectView.Material = .popover
-    var opacity: Double = 1
 
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
@@ -42,14 +38,11 @@ struct WindowFrostedBackdrop: NSViewRepresentable {
         configure(view)
         return view
     }
-
     func updateNSView(_ view: NSVisualEffectView, context: Context) { configure(view) }
-
     private func configure(_ view: NSVisualEffectView) {
-        view.material = material
+        view.material = .popover
         view.blendingMode = .behindWindow
         view.state = .active
-        view.alphaValue = opacity.isFinite ? min(1, max(0, opacity)) : 1
         view.appearance = NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua)
     }
 }

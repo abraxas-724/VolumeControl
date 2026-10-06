@@ -4,6 +4,11 @@ set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 
 APP_DIR="$ROOT_DIR/VolumeControl.app"
+VERSION=$(cat "$ROOT_DIR/VERSION")
+BUILD_NUMBER=21000
+case "$VERSION" in
+    ''|*[!0-9A-Za-z.-]*) echo "Invalid version" >&2; exit 1 ;;
+esac
 
 # 发布包同时包含 Apple Silicon 和 Intel；两种架构使用相同源码和版本。
 swift build -c release --arch arm64 --arch x86_64 --package-path "$ROOT_DIR"
@@ -12,7 +17,7 @@ rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "$BUILD_DIR/VolumeControl" "$APP_DIR/Contents/MacOS/VolumeControl"
 
-cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
+cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -28,9 +33,9 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.0.0</string>
+    <string>$VERSION</string>
     <key>CFBundleVersion</key>
-    <string>20004</string>
+    <string>$BUILD_NUMBER</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSAudioCaptureUsageDescription</key>

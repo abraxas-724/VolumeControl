@@ -5,6 +5,38 @@ import XCTest
 
 @MainActor
 final class VolumePanelTests: XCTestCase {
+    func testSmallScreenCapsPanelWithLongNamesManyAppsAndInlineError() async throws {
+        let audio = FakeAudioService()
+        audio.deviceName = "很长的中文音频输出设备名称 — External Display Audio Device"
+        let applications = (0..<40).map { index in
+            DiscoveredApplication(bundleID: "test.\(index)", name: "长应用名称与中文混合 — Music Conference Application \(index)",
+                icon: NSImage(systemSymbolName: "app.fill", accessibilityDescription: nil)!, processID: Int32(100 + index),
+                audioSessionStatus: .detected, isPlayingAudio: true)
+        }
+        let model = VolumeControlModel(audio: audio, applicationProvider: FakeApplicationProvider(values: applications),
+            audioRouter: ModelRoutingStub(), monitorDevices: false, inputPermission: ModelPermissionStub(),
+            appAudio: UnsupportedAppAudioControl(), restoreRememberedAudio: false, deviceSwitchStorage: MemoryDeviceSwitchPreferences())
+        let preferences = InterfacePreferences(storage: MemoryInterfacePreferences())
+        preferences.options.motion = .off
+        let host = NSHostingView(rootView: VolumePanel(model: model, preferences: preferences, openSettings: {})
+            .environment(\.panelMaximumHeight, 520))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 430, height: 520),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        defer { window.contentView = nil }
+        for fail in [false, true] {
+            audio.shouldFailVolume = fail
+            model.refresh()
+            try await Task.sleep(nanoseconds: 100_000_000)
+            host.layoutSubtreeIfNeeded()
+            XCTAssertEqual(host.fittingSize.width, 430, accuracy: 1)
+            XCTAssertLessThanOrEqual(host.fittingSize.height, 521, "列表必须为错误和长名称让出屏幕空间")
+            XCTAssertEqual(model.apps.count, 40)
+        }
+        XCTAssertEqual(audio.volumeWrites, 0)
+        XCTAssertEqual(audio.selectionWrites, 0)
+    }
+
     func testApplicationListKeepsUsableHeightAndRefreshDoesNotWriteSystemVolume() async throws {
         let audio = FakeAudioService()
         let names = ["腾讯会议", "Google Chrome", "Music", "Safari", "Visual Studio Code", "Slack"]
@@ -18,16 +50,16 @@ final class VolumePanelTests: XCTestCase {
         let preferences = InterfacePreferences(storage: MemoryInterfacePreferences())
         preferences.options.motion = .off
         let host = NSHostingView(rootView: VolumePanel(model: model, preferences: preferences, openSettings: {}))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 700), styleMask: [.borderless], backing: .buffered, defer: false)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 430, height: 700), styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentView = host
         host.layoutSubtreeIfNeeded()
         let size = host.fittingSize
-        XCTAssertGreaterThanOrEqual(size.height, 570, "列表不能收缩到仅容纳一个应用")
+        XCTAssertGreaterThanOrEqual(size.height, 500, "列表不能收缩到仅容纳一个应用")
         let sizing = NSHostingController(rootView: VolumePanel(model: model, preferences: preferences, openSettings: {}))
-        let normal = sizing.sizeThatFits(in: NSSize(width: 480, height: 760))
-        let oversized = sizing.sizeThatFits(in: NSSize(width: 480, height: 1100))
+        let normal = sizing.sizeThatFits(in: NSSize(width: 430, height: 760))
+        let oversized = sizing.sizeThatFits(in: NSSize(width: 430, height: 1100))
         XCTAssertEqual(normal.height, oversized.height, accuracy: 1, "面板不能拉伸成上下空白")
-        XCTAssertEqual(normal.width, 480, accuracy: 1)
+        XCTAssertEqual(normal.width, 430, accuracy: 1)
         preferences.options.density = .compact
         preferences.options.theme = .dark
         preferences.options.showPercentage = false
@@ -35,7 +67,7 @@ final class VolumePanelTests: XCTestCase {
         preferences.options.showTips = false
         preferences.options.showAdvanced = false
         try await Task.sleep(nanoseconds: 50_000_000)
-        let compact = sizing.sizeThatFits(in: NSSize(width: 480, height: 1100))
+        let compact = sizing.sizeThatFits(in: NSSize(width: 430, height: 1100))
         XCTAssertLessThan(compact.height, normal.height)
         XCTAssertEqual(audio.volumeWrites, 0)
         XCTAssertEqual(audio.selectionWrites, 0)

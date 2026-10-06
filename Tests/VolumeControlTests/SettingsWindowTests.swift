@@ -14,7 +14,7 @@ final class SettingsWindowTests: XCTestCase {
         controller.showSettings()
         let first = controller.window
         XCTAssertTrue(first?.isVisible == true)
-        XCTAssertEqual(first?.contentView?.bounds.size, NSSize(width: 500, height: 660))
+        XCTAssertEqual(first?.contentView?.bounds.size, NSSize(width: 720, height: 560))
         controller.showSettings()
         XCTAssertTrue(controller.window === first)
         first?.close()
@@ -35,8 +35,8 @@ final class SettingsWindowTests: XCTestCase {
     func testSettingsContentHasUsableIntrinsicHeight() async throws {
         let host = NSHostingView(rootView: SettingsView(preferences: InterfacePreferences(storage: MemoryInterfacePreferences()), loginItemController: SettingsLoginStub()))
         host.layoutSubtreeIfNeeded()
-        XCTAssertGreaterThanOrEqual(host.fittingSize.height, 600, "设置窗口不能因 Form 缺少理想高度而收缩")
-        XCTAssertLessThanOrEqual(host.fittingSize.height, 700)
+        XCTAssertGreaterThanOrEqual(host.fittingSize.height, 480, "设置窗口不能因 Form 缺少理想高度而收缩")
+        XCTAssertLessThanOrEqual(host.fittingSize.height, 600)
         if let path = ProcessInfo.processInfo.environment["VOLUMECONTROL_SETTINGS_SNAPSHOT"] {
             let preferences = InterfacePreferences(storage: MemoryInterfacePreferences())
             let audioModel = VolumeControlModel(audio: FakeAudioService(), applicationProvider: FakeApplicationProvider(values: []),
@@ -44,10 +44,10 @@ final class SettingsWindowTests: XCTestCase {
                 appAudio: UnsupportedAppAudioControl(), restoreRememberedAudio: false,
                 deviceSwitchStorage: MemoryDeviceSwitchPreferences())
             preferences.options.motion = .off
-            func capture(_ destination: String, page: Int = 0) async throws {
+            func capture(_ destination: String, page: SettingsPage = .appearance) async throws {
                 let preview = NSHostingView(rootView: SettingsView(preferences: preferences,
                     loginItemController: SettingsLoginStub(), audioModel: audioModel, initialPage: page))
-                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 660),
+                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 560),
                                       styleMask: [.borderless], backing: .buffered, defer: false)
                 window.contentView = preview
                 preview.appearance = NSAppearance(named: preferences.options.theme == .dark ? .darkAqua : .aqua)
@@ -76,7 +76,10 @@ final class SettingsWindowTests: XCTestCase {
             }
             let base = URL(fileURLWithPath: path).deletingPathExtension().path
             try await capture(path)
-            try await capture(base + "-general.png", page: 1)
+            try await capture(base + "-general.png", page: .general)
+            for page in [SettingsPage.audio, .advanced, .about] {
+                try await capture(base + "-" + page.rawValue + ".png", page: page)
+            }
             preferences.options.theme = .dark
             preferences.options.surface = .liquid
             preferences.options.accent = .teal

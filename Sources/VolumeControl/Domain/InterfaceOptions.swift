@@ -26,9 +26,9 @@ enum InterfaceGlassStyle: String, CaseIterable, Identifiable {
 }
 
 enum InterfaceAccent: String, CaseIterable, Identifiable {
-    case indigo, blue, teal, green, orange, pink
+    case system, indigo, blue, teal, green, orange, pink
     var id: Self { self }
-    var label: String { switch self { case .indigo: return "靛蓝"; case .blue: return "海蓝"; case .teal: return "青色"; case .green: return "薄荷"; case .orange: return "暖橙"; case .pink: return "樱粉" } }
+    var label: String { switch self { case .system: return "系统"; case .indigo: return "靛蓝"; case .blue: return "海蓝"; case .teal: return "青色"; case .green: return "薄荷"; case .orange: return "暖橙"; case .pink: return "樱粉" } }
 }
 
 enum InterfaceDensity: String, CaseIterable, Identifiable {
@@ -46,7 +46,7 @@ struct InterfaceOptions: Equatable {
     var glassStyle: InterfaceGlassStyle = .clear
     var glassBackgroundTransparency: Double = 0.88
     var motion: InterfaceMotion = .subtle
-    var accent: InterfaceAccent = .indigo
+    var accent: InterfaceAccent = .system
     var density: InterfaceDensity = .comfortable
     var showPercentage = true
     var showTips = true
@@ -64,7 +64,8 @@ struct InterfaceOptions: Equatable {
 
     func effectiveSurface(nativeGlassAvailable: Bool, reduceTransparency: Bool) -> InterfaceSurface {
         guard !reduceTransparency else { return .standard }
-        return surface == .liquid && !nativeGlassAvailable ? .frosted : surface
+        // 旧材质偏好保留用于配置兼容；实际界面由系统版本决定。
+        return nativeGlassAvailable ? .liquid : .frosted
     }
 
     func allowsMotion(reduceMotion: Bool) -> Bool { motion != .off && !reduceMotion }

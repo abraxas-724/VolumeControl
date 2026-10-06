@@ -1,8 +1,8 @@
 # VolumeControl
 
-macOS SwiftUI 状态栏音量工具。当前发布版本：**2.0.0**。
+macOS SwiftUI 状态栏音量工具。当前发布版本：**2.1.0**。
 
-从 [GitHub Release](https://github.com/abraxas-724/VolumeControl/releases/tag/v2.0.0) 下载 DMG 或 ZIP（Apple Silicon / Intel 通用包）。本次发布为 ad-hoc 签名，尚无 Developer ID 签名或苹果公证；首次打开可能被 Gatekeeper 阻止，请在“系统设置 → 隐私与安全性”确认来源后允许打开。应用音量仍按运行时验证结果启用，兼容性限制见下文。
+从 [GitHub Release](https://github.com/abraxas-724/VolumeControl/releases/tag/v2.1.0) 下载 DMG 或 ZIP（Apple Silicon / Intel 通用包）。本次发布为 ad-hoc 签名，尚无 Developer ID 签名或苹果公证；首次打开可能被 Gatekeeper 阻止，请在“系统设置 → 隐私与安全性”确认来源后允许打开。应用音量仍按运行时验证结果启用，兼容性限制见下文。
 
 ## 功能
 
@@ -102,3 +102,9 @@ sh scripts/verify-audio-routing.sh
 设置入口和面板留白已修复：齿轮按钮显式打开并置前设置窗口，关闭后可再次打开；面板按内容高度布局。验证及限制见 [设置与布局修复](docs/SETTINGS_PANEL_FIX.md)。
 
 设置现分为“外观与动效”和“通用”：支持跟随系统/浅色/深色、六种强调色、经典/磨砂/液态玻璃背景及控件、原生面板展开动效、紧凑布局及默认应用筛选等。液态模式默认使用苹果原生清透玻璃，可调背景透明度（默认 88%，只调整底层磨砂），也可选择更重视对比度的系统自适应玻璃；颜色模式另可选择跟随系统。修改即时生效，原生液态玻璃要求 macOS 26+，较早系统使用磨砂回退。功能、兼容性与验证见 [外观设置](docs/APPEARANCE_SETTINGS.md)。
+
+## macOS 原生界面精修
+
+主面板改为 430pt 原生分区与轻量应用行，设置改为侧栏偏好窗口。材质自动适配系统，新增系统强调色；旧偏好与所有音频操作保留。文件变更、兼容性、自审与验收局限见 [原生界面精修记录](docs/NATIVE_UI_REFINEMENT.md)。
+
+2.1.0 包含 macOS 原生界面精修；更新说明、安装与回滚见 [发布说明](docs/RELEASE_2.1.0.md)。

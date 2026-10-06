@@ -6,9 +6,7 @@ struct SettingsView: View {
     @State private var launchAtLogin: Bool
     @State private var loginItemStatus: LoginItemStatus
     @State private var loginItemError: String?
-    @State private var page = 0
-    @State private var previewVolume = 0.42
-    @State private var previewMuted = false
+    @State private var page: SettingsPage?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     private let loginItemController: any LoginItemControlling
@@ -16,8 +14,9 @@ struct SettingsView: View {
     let openPrivacySettings: () -> Void
     let quitApplication: () -> Void
 
-    init(preferences: InterfacePreferences, loginItemController: (any LoginItemControlling)? = nil, audioModel: VolumeControlModel? = nil,
-         initialPage: Int = 0, openPrivacySettings: @escaping () -> Void = {}, quitApplication: @escaping () -> Void = {}) {
+    init(preferences: InterfacePreferences, loginItemController: (any LoginItemControlling)? = nil,
+         audioModel: VolumeControlModel? = nil, initialPage: SettingsPage = .general,
+         openPrivacySettings: @escaping () -> Void = {}, quitApplication: @escaping () -> Void = {}) {
         self.preferences = preferences
         self.audioModel = audioModel
         _page = State(initialValue: initialPage)
@@ -30,197 +29,138 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 12) {
-                Image(systemName: "slider.horizontal.3").font(.title2.weight(.semibold))
-                    .foregroundStyle(preferences.options.accent.color)
-                    .frame(width: 46, height: 46).modifier(InteractiveSurface(emphasized: true))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("按你的喜好，调好每一处").font(.title3.weight(.semibold))
-                    Text("VolumeControl 设置").font(.caption).foregroundStyle(.secondary)
+        NavigationSplitView {
+            List(selection: $page) {
+                ForEach(SettingsPage.allCases.filter { $0 != .audio || audioModel != nil }) { item in
+                    Label(item.title, systemImage: item.symbol).tag(item)
                 }
             }
-            Picker("设置页面", selection: $page) {
-                Text("外观与动效").tag(0)
-                Text("通用").tag(1)
-            }.pickerStyle(.segmented).labelsHidden()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    if page == 0 { appearance } else { general }
-                }.padding(.bottom, 4)
-            }.scrollIndicators(.visible)
-            HStack {
-                Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0.0").font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                Button("重置界面设置") { preferences.resetAppearance() }
-                    .buttonStyle(.borderless).font(.caption)
-                    .help("只重置外观和面板显示，不改变音量、应用授权或登录启动")
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: 140, ideal: 160, max: 200)
+            .navigationTitle("设置")
+        } detail: {
+            Form {
+                switch page ?? .general {
+                case .general: general
+                case .appearance: appearance
+                case .audio:
+                    if let audioModel { HeadphoneSwitchSettings(model: audioModel) }
+                case .advanced: advanced
+                case .about: about
+                }
             }
+            .formStyle(.grouped)
+            .navigationTitle((page ?? .general).title)
         }
-        .padding(22)
-        .frame(width: 500, height: 660)
-        .background(InterfaceBackdrop())
-        .animation(preferences.options.animation(reduceMotion: reduceMotion), value: page)
+        .navigationSplitViewStyle(.balanced)
+        .frame(minWidth: 680, idealWidth: 720, minHeight: 480, idealHeight: 560)
         .modifier(InterfaceAppearance(options: preferences.options))
         .onAppear { refreshLoginStatus() }
     }
 
-    private var appearance: some View {
+    private var general: some View {
         Group {
-            preview
-            section("颜色模式", symbol: "circle.lefthalf.filled") {
-                Picker("颜色模式", selection: $preferences.options.theme) {
-                    ForEach(InterfaceTheme.allCases) { Text($0.label).tag($0) }
-                }.pickerStyle(.segmented).labelsHidden()
+            Section("启动") {
+                Toggle("登录时启动", isOn: $launchAtLogin)
+                    .onChange(of: launchAtLogin) { _, enabled in updateLogin(enabled) }
+                if loginItemStatus == .requiresApproval { caption("请在系统设置的登录项中允许 VolumeControl。") }
+                else if loginItemStatus == .unavailable { caption("请将应用放入“应用程序”文件夹后再启用登录启动。") }
+                if let loginItemError { Label(loginItemError, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.secondary) }
             }
-            section("界面材质", symbol: "drop.fill") {
-                Picker("界面材质", selection: $preferences.options.surface) {
-                    ForEach(InterfaceSurface.allCases) { Text($0.label).tag($0) }
-                }.pickerStyle(.segmented).labelsHidden()
-                if preferences.options.surface == .liquid {
-                    if #available(macOS 26.0, *) {
-                        Picker("玻璃风格", selection: $preferences.options.glassStyle) {
-                            ForEach(InterfaceGlassStyle.allCases) { Text($0.label).tag($0) }
-                        }.pickerStyle(.segmented)
-                        if preferences.options.glassStyle == .clear {
-                            HStack {
-                                Text("背景透明度")
-                                Spacer()
-                                Text("\(Int(preferences.options.safeGlassBackgroundTransparency * 100))%")
-                                    .monospacedDigit().foregroundStyle(.secondary)
-                            }
-                            Slider(value: $preferences.options.glassBackgroundTransparency, in: 0...1)
-                                .accessibilityLabel("背景透明度")
-                            HStack {
-                                Text("更多磨砂")
-                                Spacer()
-                                Text("更加透明")
-                            }.font(.caption).foregroundStyle(.secondary)
-                            caption("使用苹果原生清透液态玻璃；透明度只调整底层磨砂，文字和按钮保持清晰。颜色模式可独立跟随系统。")
-                        } else {
-                            caption("使用苹果原生自适应液态玻璃与系统磨砂，系统自动调整明暗和对比度，背景遮挡更强。")
-                        }
-                    } else { caption("原生液态玻璃需要 macOS 26+；当前使用磨砂玻璃。") }
-                }
-                if preferences.options.surface == .frosted { caption("主页面背景使用窗口后方的磨砂材质，正文卡片保持清晰。") }
-                if reduceTransparency { caption("系统已开启减少透明度，当前使用实色界面。") }
-            }
-            section("强调色", symbol: "paintpalette.fill") {
-                HStack(spacing: 16) {
-                    ForEach(InterfaceAccent.allCases) { accent in
-                        Button { preferences.options.accent = accent } label: {
-                            Circle().fill(accent.color).frame(width: 30, height: 30)
-                                .overlay {
-                                    if preferences.options.accent == accent {
-                                        Image(systemName: "checkmark").font(.caption.weight(.bold)).foregroundStyle(.white)
-                                    }
-                                }
-                                .padding(3)
-                                .overlay(Circle().strokeBorder(accent.color.opacity(preferences.options.accent == accent ? 0.8 : 0), lineWidth: 2))
-                        }
-                        .buttonStyle(.plain).accessibilityLabel("\(accent.label)强调色")
-                        .accessibilityAddTraits(preferences.options.accent == accent ? .isSelected : [])
-                        .help(accent.label)
-                    }
-                }.frame(maxWidth: .infinity)
-            }
-            section("面板展开动效", symbol: "sparkles") {
-                Picker("面板展开动效", selection: $preferences.options.motion) {
-                    ForEach(InterfaceMotion.selectableCases) { Text($0.label).tag($0) }
-                }.pickerStyle(.segmented).labelsHidden()
-                caption(reduceMotion ? "系统已开启减少动态效果，面板直接显示。" : "点击状态栏声音图标时，面板从图标处原生展开；再次点击收起。")
-            }
-            section("布局密度", symbol: "rectangle.compress.vertical") {
-                Picker("布局密度", selection: $preferences.options.density) {
-                    ForEach(InterfaceDensity.allCases) { Text($0.label).tag($0) }
-                }.pickerStyle(.segmented).labelsHidden()
-                caption("紧凑模式缩小行间距和列表高度，更适合小屏幕。")
+            Section("面板显示") {
+                Toggle("显示音量百分比", isOn: $preferences.options.showPercentage)
+                Toggle("显示操作提示", isOn: $preferences.options.showTips)
+                Toggle("默认显示已启用应用", isOn: $preferences.options.defaultToEnabledApps)
+                caption("已启用筛选包括正在验证与等待恢复的应用。筛选不会改变音频控制。")
             }
         }
     }
 
-    private var preview: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("外观预览", systemImage: "wand.and.stars").font(.subheadline.weight(.semibold))
-                Spacer()
-                Text(previewMuted ? "静音" : "\(Int(previewVolume * 100))%")
-                    .font(.system(.title2, design: .rounded).weight(.semibold).monospacedDigit())
-                    .foregroundStyle(preferences.options.accent.color)
-                    .contentTransition(.numericText())
-                    .animation(preferences.options.animation(reduceMotion: reduceMotion), value: Int(previewVolume * 100))
-            }
-            GlassControlGroup {
-                HStack(spacing: 12) {
-                    Button { previewMuted.toggle() } label: {
-                        VolumeSymbol(muted: previewMuted)
-                    }.buttonStyle(PanelIconButtonStyle()).accessibilityLabel("切换预览静音")
-                    Slider(value: $previewVolume).accessibilityLabel("预览音量")
-                }
-            }
-            caption("试试按钮和滑块；此处只预览外观，不改变实际音量。")
-        }.modifier(PanelCard())
-    }
-
-    private var general: some View {
+    private var appearance: some View {
         Group {
-            if let audioModel { HeadphoneSwitchSettings(model: audioModel) }
-            section("启动与显示", symbol: "switch.2") {
-                toggleRow("登录时启动", isOn: $launchAtLogin)
-                    .onChange(of: launchAtLogin) { _, enabled in updateLogin(enabled) }
-                if loginItemStatus == .requiresApproval {
-                    caption("请在系统设置的登录项中允许 VolumeControl。")
-                } else if loginItemStatus == .unavailable {
-                    caption("请将应用放入“应用程序”文件夹后再启用登录启动。")
+            Section("外观") {
+                Picker("颜色模式", selection: $preferences.options.theme) {
+                    ForEach(InterfaceTheme.allCases) { Text($0.label).tag($0) }
                 }
-                if let loginItemError { Text(loginItemError).font(.caption).foregroundStyle(.red) }
-                Divider()
-                toggleRow("显示音量百分比", isOn: $preferences.options.showPercentage)
-                toggleRow("显示操作提示", isOn: $preferences.options.showTips)
-                toggleRow("显示高级路由入口", isOn: $preferences.options.showAdvanced)
+                Picker("强调色", selection: $preferences.options.accent) {
+                    ForEach(InterfaceAccent.allCases) { Text($0.label).tag($0) }
+                }
+                Toggle("紧凑布局", isOn: Binding(get: { preferences.options.density == .compact },
+                    set: { preferences.options.density = $0 ? .compact : .comfortable }))
+                caption("背景材质随 macOS 自动适配，强调色仅用于控件和选中状态。")
+                if reduceTransparency { caption("系统已开启减少透明度，面板使用实色背景。") }
             }
-            section("应用列表", symbol: "app.badge") {
-                toggleRow("默认显示已启用应用", isOn: $preferences.options.defaultToEnabledApps)
-                caption("包括正在验证与等待恢复的应用。筛选不会启用或停用音频控制。")
+            Section("动态效果") {
+                Toggle("使用界面动效", isOn: Binding(get: { preferences.options.motion != .off },
+                    set: { preferences.options.motion = $0 ? .subtle : .off }))
+                caption(reduceMotion ? "系统已开启减少动态效果，界面动画与面板展开动画均已关闭。" : "使用短暂反馈和系统原生弹出动画。")
             }
-            section("隐私与应用", symbol: "hand.raised.fill") {
-                caption("应用音频只在本机处理，不保存录音文件或上传。修改外观不会影响音量或授权。")
+            Section {
+                Button("重置界面设置") { preferences.resetAppearance() }
+                caption("恢复外观和面板显示默认值，保留音量、音频授权和登录启动。")
+            }
+        }
+    }
+
+    private var advanced: some View {
+        Group {
+            Section("实验功能") {
+                Toggle("显示高级路由入口", isOn: $preferences.options.showAdvanced)
+                caption("BlackHole 路由验证位于音量面板，与原生应用音量控制互斥。运行或启动路由时，入口始终保留。")
+                if let audioModel {
+                    LabeledContent("BlackHole", value: audioModel.blackHoleAvailable ? "已安装" : "未检测到")
+                    LabeledContent("路由状态", value: audioModel.isEnablingRouting ? "正在验证" : audioModel.isV2Enabled ? "验证运行中" : "未运行")
+                }
+            }
+            Section("权限") {
                 Button(action: openPrivacySettings) { Label("打开系统隐私设置", systemImage: "arrow.up.right.square") }
-                    .buttonStyle(.bordered)
-                Button(action: quitApplication) { Label("退出 VolumeControl", systemImage: "power") }
-                    .buttonStyle(.bordered)
+                caption("启用应用音量需要系统音频录制权限；BlackHole 路由验证需要相应输入权限。")
             }
-        }.toggleStyle(.switch)
+        }
     }
 
-    private func section<Content: View>(_ title: String, symbol: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label(title, systemImage: symbol).font(.subheadline.weight(.semibold))
-                .foregroundStyle(preferences.options.accent.color)
-            content()
-        }.frame(maxWidth: .infinity, alignment: .leading).modifier(PanelCard())
-    }
-
-    private func toggleRow(_ title: String, isOn binding: Binding<Bool>) -> some View {
-        HStack {
-            Text(title)
-            Spacer()
-            Toggle(title, isOn: binding).labelsHidden().toggleStyle(.switch)
+    private var about: some View {
+        Group {
+            Section {
+                HStack(spacing: 12) {
+                    Image(systemName: "speaker.wave.2.fill").font(.largeTitle).foregroundStyle(.secondary).accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("VolumeControl").font(.title3)
+                        Text("版本 \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "开发版本")")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                caption("系统声音与应用独立音量控制。原生应用音量为 Beta，逐应用验证后启用。")
+                Link("GitHub", destination: URL(string: "https://github.com/abraxas-724/VolumeControl")!)
+            }
+            Section("隐私") {
+                caption("应用音频仅在本机处理，不保存录音文件或上传。")
+            }
+            Section { Button("退出 VolumeControl", action: quitApplication) }
         }
     }
 
     private func caption(_ text: String) -> some View {
         Text(text).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
     }
-
     private func refreshLoginStatus() {
         loginItemStatus = loginItemController.status
         launchAtLogin = loginItemStatus.isRegistered
     }
-
     private func updateLogin(_ enabled: Bool) {
         do { try loginItemController.setEnabled(enabled); loginItemError = nil }
         catch { loginItemError = error.localizedDescription }
         refreshLoginStatus()
+    }
+}
+
+enum SettingsPage: String, CaseIterable, Identifiable {
+    case general, appearance, audio, advanced, about
+    var id: Self { self }
+    var title: String {
+        switch self { case .general: return "通用"; case .appearance: return "外观"; case .audio: return "音频"; case .advanced: return "高级"; case .about: return "关于" }
+    }
+    var symbol: String {
+        switch self { case .general: return "gearshape"; case .appearance: return "circle.lefthalf.filled"; case .audio: return "headphones"; case .advanced: return "wrench.and.screwdriver"; case .about: return "info.circle" }
     }
 }

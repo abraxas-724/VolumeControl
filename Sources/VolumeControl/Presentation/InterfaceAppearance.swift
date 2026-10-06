@@ -3,27 +3,50 @@ import SwiftUI
 private struct InterfaceOptionsKey: EnvironmentKey {
     static let defaultValue = InterfaceOptions()
 }
-
-private struct InsideGlassCardKey: EnvironmentKey {
+private struct PanelMaximumHeightKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 680
+}
+private struct NativePopoverGlassKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+private struct PanelReduceMotionKey: EnvironmentKey { static let defaultValue: Bool? = nil }
+private struct PanelReduceTransparencyKey: EnvironmentKey { static let defaultValue: Bool? = nil }
+
 extension EnvironmentValues {
+    var panelReduceMotion: Bool? {
+        get { self[PanelReduceMotionKey.self] }
+        set { self[PanelReduceMotionKey.self] = newValue }
+    }
+    var panelReduceTransparency: Bool? {
+        get { self[PanelReduceTransparencyKey.self] }
+        set { self[PanelReduceTransparencyKey.self] = newValue }
+    }
     var interfaceOptions: InterfaceOptions {
         get { self[InterfaceOptionsKey.self] }
         set { self[InterfaceOptionsKey.self] = newValue }
     }
-
-    var isInsideGlassCard: Bool {
-        get { self[InsideGlassCardKey.self] }
-        set { self[InsideGlassCardKey.self] = newValue }
+    var panelMaximumHeight: CGFloat {
+        get { self[PanelMaximumHeightKey.self] }
+        set { self[PanelMaximumHeightKey.self] = newValue }
+    }
+    var usesNativePopoverGlass: Bool {
+        get { self[NativePopoverGlassKey.self] }
+        set { self[NativePopoverGlassKey.self] = newValue }
     }
 }
 
 extension InterfaceAccent {
     var color: Color {
-        switch self { case .indigo: return .indigo; case .blue: return .blue; case .teal: return .teal
-        case .green: return .green; case .orange: return .orange; case .pink: return .pink }
+        switch self {
+        case .system: return Color(nsColor: .controlAccentColor)
+        case .indigo: return .indigo
+        case .blue: return .blue
+        case .teal: return .teal
+        case .green: return .green
+        case .orange: return .orange
+        case .pink: return .pink
+        }
     }
 }
 
@@ -33,15 +56,10 @@ extension InterfaceTheme {
     }
 }
 
-@available(macOS 26.0, *)
-extension InterfaceGlassStyle {
-    var material: Glass { self == .clear ? .clear : .regular }
-}
-
 extension InterfaceOptions {
-    func animation(reduceMotion: Bool) -> Animation? {
+    func animation(reduceMotion: Bool, duration: Double = PanelMotion.state) -> Animation? {
         guard allowsMotion(reduceMotion: reduceMotion) else { return nil }
-        return .easeInOut(duration: 0.18)
+        return .easeOut(duration: duration)
     }
 }
 
@@ -58,80 +76,10 @@ struct InterfaceAppearance: ViewModifier {
     }
 }
 
-/// 音量卡片与独立控件使用原生玻璃；旧系统使用系统磨砂材质。
 enum InterfaceAppearanceSupport {
     static var nativeGlassAvailable: Bool {
         if #available(macOS 26.0, *) { return true }
         return false
-    }
-}
-
-struct InteractiveSurface: ViewModifier {
-    @Environment(\.interfaceOptions) private var options
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.isInsideGlassCard) private var isInsideGlassCard
-    var radius: CGFloat = 12
-    var emphasized = false
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        let surface = options.effectiveSurface(nativeGlassAvailable: InterfaceAppearanceSupport.nativeGlassAvailable,
-                                               reduceTransparency: reduceTransparency)
-        if surface == .liquid && isInsideGlassCard {
-            // 卡片已是玻璃：内部按钮用薄填充，避免玻璃套玻璃破坏采样。
-            content.background(emphasized ? options.accent.color.opacity(0.14) : Color.primary.opacity(0.05),
-                               in: RoundedRectangle(cornerRadius: radius))
-        } else if surface == .liquid {
-            if #available(macOS 26.0, *) {
-                content.glassEffect(options.glassStyle.material.tint(emphasized ? options.accent.color.opacity(0.2) : nil).interactive(),
-                                    in: RoundedRectangle(cornerRadius: radius))
-            } else { frosted(content) }
-        } else if surface == .frosted {
-            frosted(content)
-        } else {
-            content.background(emphasized ? options.accent.color.opacity(0.14) : Color.primary.opacity(0.05),
-                               in: RoundedRectangle(cornerRadius: radius))
-        }
-    }
-
-    private func frosted(_ content: Content) -> some View {
-        content.background(.thinMaterial, in: RoundedRectangle(cornerRadius: radius))
-            .overlay(RoundedRectangle(cornerRadius: radius).strokeBorder(.primary.opacity(0.08)))
-    }
-}
-
-/// 容器始终存在，只让分区材质随偏好更新，搜索和筛选不随玻璃开关重建。
-struct PanelGlassComposition: ViewModifier {
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
-            GlassEffectContainer(spacing: 0) { content }
-        } else { content }
-    }
-}
-
-struct GlassControlGroup<Content: View>: View {
-    @Environment(\.interfaceOptions) private var options
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @ViewBuilder let content: () -> Content
-    @ViewBuilder var body: some View {
-        if #available(macOS 26.0, *), options.surface == .liquid && !reduceTransparency {
-            GlassEffectContainer(spacing: 12) { content() }
-        } else { content() }
-    }
-}
-
-struct InterfaceBackdrop: View {
-    @Environment(\.interfaceOptions) private var options
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    var body: some View {
-        ZStack {
-            Color(nsColor: .windowBackgroundColor)
-            if options.surface != .standard && !reduceTransparency {
-                LinearGradient(colors: [options.accent.color.opacity(0.16), .clear, options.accent.color.opacity(0.05)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-            }
-        }.allowsHitTesting(false)
     }
 }
 
