@@ -2,7 +2,7 @@
 # 使用方法：sh scripts/build-dmg.sh [version]
 set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-VERSION=${1:-2.0.0}
+VERSION=${1:-$(cat "$ROOT_DIR/VERSION")}
 case "$VERSION" in
     ''|*[!0-9A-Za-z.-]*) echo "Invalid version" >&2; exit 1 ;;
 esac

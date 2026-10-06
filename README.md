@@ -1,8 +1,8 @@
 # VolumeControl
 
-macOS SwiftUI 状态栏音量工具。当前发布版本：**2.0.0**。
+macOS SwiftUI 状态栏音量工具。当前发布版本：**2.1.0**。
 
-从 [GitHub Release](https://github.com/abraxas-724/VolumeControl/releases/tag/v2.0.0) 下载 DMG 或 ZIP（Apple Silicon / Intel 通用包）。本次发布为 ad-hoc 签名，尚无 Developer ID 签名或苹果公证；首次打开可能被 Gatekeeper 阻止，请在“系统设置 → 隐私与安全性”确认来源后允许打开。应用音量仍按运行时验证结果启用，兼容性限制见下文。
+从 [GitHub Release](https://github.com/abraxas-724/VolumeControl/releases/tag/v2.1.0) 下载 DMG 或 ZIP（Apple Silicon / Intel 通用包）。本次发布为 ad-hoc 签名，尚无 Developer ID 签名或苹果公证；首次打开可能被 Gatekeeper 阻止，请在“系统设置 → 隐私与安全性”确认来源后允许打开。应用音量仍按运行时验证结果启用，兼容性限制见下文。
 
 ## 功能
 
@@ -106,3 +106,5 @@ sh scripts/verify-audio-routing.sh
 ## macOS 原生界面精修
 
 主面板改为 430pt 原生分区与轻量应用行，设置改为侧栏偏好窗口。材质自动适配系统，新增系统强调色；旧偏好与所有音频操作保留。文件变更、兼容性、自审与验收局限见 [原生界面精修记录](docs/NATIVE_UI_REFINEMENT.md)。
+
+2.1.0 包含 macOS 原生界面精修；更新说明、安装与回滚见 [发布说明](docs/RELEASE_2.1.0.md)。

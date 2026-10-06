@@ -126,7 +126,7 @@ struct SettingsView: View {
                     Image(systemName: "speaker.wave.2.fill").font(.largeTitle).foregroundStyle(.secondary).accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 4) {
                         Text("VolumeControl").font(.title3)
-                        Text("版本 \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0.0")")
+                        Text("版本 \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "开发版本")")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
