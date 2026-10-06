@@ -18,6 +18,47 @@ final class AppAudioRestorationTests: XCTestCase {
     }
     private func settle() async throws { try await Task.sleep(nanoseconds: 30_000_000) }
 
+    func testOutputSwitchClosesOldSessionAndRevalidatesRememberedSettings() async throws {
+        let storage = MemoryAppAudioPreferences()
+        storage.values[target.bundleID] = AppAudioPreferences(volume: 0.35, isMuted: true, isEnabled: true)
+        let provider = RestorationApplications()
+        provider.values = [application()]
+        let factory = TestProcessFactory()
+        let audio = FakeAudioService()
+        let value = VolumeControlModel(audio: audio, applicationProvider: provider, audioRouter: ModelRoutingStub(),
+                                       monitorDevices: false, appAudio: ProcessTapVolumeController(factory: factory, storage: storage))
+        try await settle()
+        let original = try XCTUnwrap(factory.sessions[target])
+        value.selectOutputDevice(2)
+        XCTAssertGreaterThanOrEqual(original.closes, 1)
+        XCTAssertFalse(value.apps[0].capability.isSupported, "新设备验证前不能显示虚假的可调节状态")
+        try await settle()
+        XCTAssertEqual(factory.made.count, 2)
+        XCTAssertTrue(value.apps[0].capability.isSupported)
+        XCTAssertEqual(value.apps[0].volume, 0.35, accuracy: 0.0001)
+        XCTAssertTrue(value.apps[0].isMuted)
+        XCTAssertTrue(try storage.load(target.bundleID).isEnabled)
+        value.suspendAppAudioControl()
+    }
+
+    func testOutputSwitchAbortsWhenOldSessionCannotBeCleanedUp() async throws {
+        let storage = MemoryAppAudioPreferences()
+        let provider = RestorationApplications()
+        provider.values = [application()]
+        let factory = TestProcessFactory()
+        let audio = FakeAudioService()
+        let value = VolumeControlModel(audio: audio, applicationProvider: provider, audioRouter: ModelRoutingStub(),
+                                       monitorDevices: false, appAudio: ProcessTapVolumeController(factory: factory, storage: storage))
+        await value.enableAppVolume(id: target.id)
+        factory.sessions[target]?.closeError = AppAudioError.cleanup("旧设备清理失败")
+        value.selectOutputDevice(2)
+        XCTAssertEqual(audio.selectionWrites, 0)
+        XCTAssertEqual(value.selectedOutputDeviceID, 1)
+        XCTAssertTrue(value.lastError?.contains("旧设备清理失败") == true)
+        factory.sessions[target]?.closeError = nil
+        value.suspendAppAudioControl()
+    }
+
     func testReopeningRestoresEnabledApplicationWithSavedVolumeAndMute() async throws {
         let storage = MemoryAppAudioPreferences()
         storage.values[target.bundleID] = AppAudioPreferences(volume: 0.35, isMuted: true, isEnabled: true)

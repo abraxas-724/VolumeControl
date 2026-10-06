@@ -115,7 +115,7 @@ struct VolumePanel: View {
                     .font(.subheadline.weight(.semibold))
                 Spacer()
                 if showPercentage {
-                    Text("\(Int(model.systemVolume * 100))%")
+                    Text(model.canAdjustSystemVolume ? "\(Int(model.systemVolume * 100))%" : "设备不支持音量调节")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
@@ -130,10 +130,34 @@ struct VolumePanel: View {
                 .buttonStyle(.borderless)
                 .accessibilityLabel(model.isMuted ? "取消静音" : "静音")
                 .help(model.isMuted ? "取消静音" : "静音")
+                .disabled(!model.canMuteSystemAudio)
 
                 Slider(value: $model.systemVolume, in: 0...1) { editing in
                     if !editing { model.commitSystemVolume() }
                 }
+                .disabled(!model.canAdjustSystemVolume)
+                .accessibilityLabel("系统音量")
+            }
+            HStack {
+                Label("输出设备", systemImage: "hifispeaker.fill")
+                    .font(.caption)
+                Spacer()
+                Menu {
+                    ForEach(model.outputDevices) { device in
+                        Button { model.selectOutputDevice(device.id) } label: {
+                            if device.id == model.selectedOutputDeviceID {
+                                Label(device.name, systemImage: "checkmark")
+                            } else {
+                                Text(device.name)
+                            }
+                        }
+                    }
+                } label: {
+                    Text(model.outputDeviceName).lineLimit(1)
+                }
+                .disabled(model.outputDevices.isEmpty || model.isV2Enabled || model.isEnablingRouting)
+                .accessibilityLabel("选择音频输出设备")
+                .help(model.isV2Enabled || model.isEnablingRouting ? "请先停止高级路由测试" : "切换电脑默认音频输出")
             }
         }
         .padding(16)

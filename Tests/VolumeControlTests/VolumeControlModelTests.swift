@@ -1,4 +1,5 @@
 import AppKit
+import CoreAudio
 import XCTest
 @testable import VolumeControl
 
@@ -9,6 +10,28 @@ final class FakeAudioService: AudioService {
     var shouldFail = false
     var shouldFailVolume = false
     var volumeWrites = 0
+
+    var devices = [OutputAudioDevice(id: 1, name: "测试输出"), OutputAudioDevice(id: 2, name: "USB 耳机")]
+    var selectedDevice: AudioDeviceID = 1
+    var selectionError: Error?
+    var selectionWrites = 0
+
+    func outputDevices() throws -> [OutputAudioDevice] {
+        if shouldFail { throw AudioServiceError.noDefaultOutputDevice }
+        return devices
+    }
+    func defaultOutputDevice() throws -> AudioDeviceID {
+        if shouldFail { throw AudioServiceError.noDefaultOutputDevice }
+        return selectedDevice
+    }
+    func selectOutputDevice(_ device: AudioDeviceID) throws {
+        selectionWrites += 1
+        if let selectionError { throw selectionError }
+        selectedDevice = device
+        deviceName = devices.first { $0.id == device }!.name
+        volume = 0.65
+        muted = true
+    }
 
     func readSystemVolume() throws -> Double {
         if shouldFail || shouldFailVolume { throw AudioServiceError.propertyUnavailable("测试音量") }
@@ -81,6 +104,81 @@ final class VolumeControlModelTests: XCTestCase {
         XCTAssertEqual(audio.volume, 0.8)
         model.toggleMute()
         XCTAssertTrue(audio.muted)
+    }
+
+    func testOutputSelectionRefreshesDeviceVolumeAndMuteWithoutWritingVolume() {
+        let audio = FakeAudioService()
+        let model = makeModel(audio: audio, applicationProvider: FakeApplicationProvider(values: []))
+        XCTAssertEqual(model.outputDevices, audio.devices)
+        XCTAssertEqual(model.selectedOutputDeviceID, 1)
+        model.selectOutputDevice(2)
+        XCTAssertEqual(model.selectedOutputDeviceID, 2)
+        XCTAssertEqual(model.outputDeviceName, "USB 耳机")
+        XCTAssertEqual(model.systemVolume, 0.65)
+        XCTAssertTrue(model.isMuted)
+        XCTAssertEqual(audio.volumeWrites, 0)
+        XCTAssertNil(model.lastError)
+    }
+
+    func testDisconnectedOutputSelectionDoesNotWriteAndKeepsErrorAfterRefresh() {
+        let audio = FakeAudioService()
+        let model = makeModel(audio: audio, applicationProvider: FakeApplicationProvider(values: []))
+        audio.devices.removeAll { $0.id == 2 }
+        model.selectOutputDevice(2)
+        model.refresh()
+        XCTAssertEqual(audio.selectionWrites, 0)
+        XCTAssertEqual(model.selectedOutputDeviceID, 1)
+        XCTAssertTrue(model.lastError?.contains("已断开") == true)
+        XCTAssertEqual(model.outputDevices.count, 1)
+    }
+
+    func testFailedSelectionReadsActualDeviceAndDisplaysContext() {
+        let audio = FakeAudioService()
+        audio.selectionError = AudioServiceError.operationFailed(operation: "切换默认输出设备", status: -50)
+        let model = makeModel(audio: audio, applicationProvider: FakeApplicationProvider(values: []))
+        model.selectOutputDevice(2)
+        XCTAssertEqual(model.selectedOutputDeviceID, 1)
+        XCTAssertTrue(model.lastError?.contains("OSStatus -50") == true)
+    }
+
+    func testSelectingCurrentOutputDoesNotWrite() {
+        let audio = FakeAudioService()
+        let model = makeModel(audio: audio, applicationProvider: FakeApplicationProvider(values: []))
+        model.selectOutputDevice(1)
+        XCTAssertEqual(audio.selectionWrites, 0)
+    }
+
+    func testExternalOutputChangeRefreshesSelection() {
+        let audio = FakeAudioService()
+        let model = makeModel(audio: audio, applicationProvider: FakeApplicationProvider(values: []))
+        audio.selectedDevice = 2
+        audio.deviceName = "USB 耳机"
+        model.refresh()
+        XCTAssertEqual(model.selectedOutputDeviceID, 2)
+        XCTAssertEqual(model.outputDeviceName, "USB 耳机")
+    }
+
+    func testOutputSelectionRemainsAvailableWithoutHardwareVolume() {
+        let audio = FakeAudioService()
+        audio.shouldFailVolume = true
+        let model = makeModel(audio: audio, applicationProvider: FakeApplicationProvider(values: []))
+        XCTAssertFalse(model.canAdjustSystemVolume)
+        XCTAssertFalse(model.canMuteSystemAudio)
+        model.selectOutputDevice(2)
+        XCTAssertEqual(model.selectedOutputDeviceID, 2)
+    }
+
+    func testOutputSelectionIsBlockedDuringRouting() async {
+        let audio = FakeAudioService()
+        let router = ModelRoutingStub()
+        router.available = true
+        let model = VolumeControlModel(audio: audio, applicationProvider: FakeApplicationProvider(values: []),
+                                       audioRouter: router, monitorDevices: false, inputPermission: ModelPermissionStub(),
+                                       appAudio: UnsupportedAppAudioControl())
+        await model.enableV2()
+        model.selectOutputDevice(2)
+        XCTAssertEqual(audio.selectionWrites, 0)
+        XCTAssertTrue(model.lastError?.contains("高级路由") == true)
     }
 
     func testApplicationsExposeCapabilityWithoutFakingSupport() {

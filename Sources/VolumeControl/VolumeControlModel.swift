@@ -1,4 +1,5 @@
 import AppKit
+import CoreAudio
 import Foundation
 import OSLog
 
@@ -48,6 +49,10 @@ final class VolumeControlModel: ObservableObject {
     @Published var systemVolume: Double
     @Published private(set) var isMuted = false
     @Published private(set) var apps: [AppVolume] = []
+    @Published private(set) var outputDevices: [OutputAudioDevice] = []
+    @Published private(set) var selectedOutputDeviceID: AudioDeviceID?
+    @Published private(set) var canAdjustSystemVolume = false
+    @Published private(set) var canMuteSystemAudio = false
     @Published private(set) var outputDeviceName = "默认输出设备"
     @Published private(set) var statusMessage = "正在探测音频状态"
     @Published private(set) var isV2Enabled = false
@@ -290,6 +295,30 @@ final class VolumeControlModel: ObservableObject {
         publishApplications()
     }
 
+    func selectOutputDevice(_ id: AudioDeviceID) {
+        guard !isV2Enabled, !isEnablingRouting else {
+            report(AudioServiceError.propertyUnavailable("请先停止高级路由测试，再切换输出设备"))
+            return
+        }
+        do {
+            guard try audio.outputDevices().contains(where: { $0.id == id }) else {
+                throw AudioServiceError.propertyUnavailable("所选输出设备已断开或不可用")
+            }
+            guard try audio.defaultOutputDevice() != id else { refresh(); return }
+            activationTasks.values.forEach { $0.cancel() }
+            // 释放绑定旧设备的 tap，但保留用户已授权的自动恢复和音量设置。
+            try appAudio.suspendAll()
+            try audio.selectOutputDevice(id)
+            nextRestoreAttempt.removeAll()
+            lastError = nil
+            refresh()
+            statusMessage = "输出已切换到 \(outputDeviceName)"
+        } catch {
+            refresh()
+            report(error)
+        }
+    }
+
     func commitSystemVolume() {
         do {
             try audio.writeSystemVolume(systemVolume)
@@ -376,20 +405,36 @@ final class VolumeControlModel: ObservableObject {
     }
 
     private func refreshSystemAudio() -> String? {
+        var errors: [String] = []
         do {
+            outputDevices = try audio.outputDevices()
+        } catch {
+            outputDevices = []
+            errors.append(error.localizedDescription)
+        }
+        do {
+            selectedOutputDeviceID = try audio.defaultOutputDevice()
             outputDeviceName = try audio.outputDeviceName()
         } catch {
+            selectedOutputDeviceID = nil
             outputDeviceName = "输出设备不可用"
-            return error.localizedDescription
+            errors.append(error.localizedDescription)
         }
-
         do {
             systemVolume = Self.clamped(try audio.readSystemVolume())
-            isMuted = try audio.readMuted()
-            return nil
+            canAdjustSystemVolume = true
         } catch {
-            return error.localizedDescription
+            canAdjustSystemVolume = false
+            errors.append(error.localizedDescription)
         }
+        do {
+            isMuted = try audio.readMuted()
+            canMuteSystemAudio = true
+        } catch {
+            canMuteSystemAudio = false
+            if !errors.contains(error.localizedDescription) { errors.append(error.localizedDescription) }
+        }
+        return errors.first
     }
 
     private static func clamped(_ value: Double) -> Double {
